@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 L30 10 L16 18 L2 10 Z' fill='%233d7fc4'/%3E%3Cpath d='M2 10 L16 18 L16 30 L2 22 Z' fill='%2324558c'/%3E%3Cpath d='M30 10 L16 18 L16 30 L30 22 Z' fill='%2316324f'/%3E%3C/svg%3E">
+<title>几何岛屿 · 我的想法流</title>
+<link rel="stylesheet" href="style.css?v=20260908-11">
+<!-- Gitalk 评论样式 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gitalk@1/dist/gitalk.css">
+</head>
+<body>
+
+<!-- ============ 侧边主题面板 ============ -->
+<div class="theme-panel" id="themePanel">
+  <div class="theme-category">昼夜</div>
+  <button class="theme-btn day-btn active" data-mode="day" aria-label="切换到白天主题">昼</button>
+  <button class="theme-btn night-btn" data-mode="night" aria-label="切换到星夜主题">夜</button>
+  <div class="theme-divider"></div>
+  <div class="theme-category">四季</div>
+  <button class="theme-btn season-spring" data-season="spring" aria-label="切换到春季主题">春</button>
+  <button class="theme-btn season-summer active" data-season="summer" aria-label="切换到夏季主题">夏</button>
+  <button class="theme-btn season-autumn" data-season="autumn" aria-label="切换到秋季主题">秋</button>
+  <button class="theme-btn season-winter" data-season="winter" aria-label="切换到冬季主题">冬</button>
+</div>
+
+<!-- ============ 导航栏 ============ -->
+<nav>
+  <div class="brand">
+    <div class="brand-logo">◱</div>
+    <span>几何岛屿</span>
+  </div>
+  <div class="nav-links">
+    <a href="#home" data-page="home" class="active">首页</a>
+    <a href="#album" data-page="album">相册</a>
+  </div>
+  <div class="nav-actions">
+    <button class="nav-btn nav-btn-primary" id="btnNewPost" hidden>＋ 新建帖子</button>
+    <button class="nav-btn" id="btnUploadPhoto" hidden>⬆ 上传照片</button>
+    <button class="nav-btn login-btn" id="btnLogin">登录 GitHub</button>
+    <span class="user-chip" id="userChip" hidden></span>
+    <button class="nav-btn login-btn" id="btnLogout" hidden>登出</button>
+  </div>
+</nav>
+
+<main>
+
+  <!-- 登录入口提示（仅未登录时显示） -->
+  <div class="login-tip" id="loginTip">登录 GitHub 后即可评论、点赞互动</div>
+
+  <!-- ============ 首页 ============ -->
+  <section id="home" class="page active">
+
+    <!-- 漂浮几何装饰 -->
+    <div class="float-shape fs-1">
+      <svg width="46" height="46" viewBox="0 0 46 46" fill="none">
+        <path d="M23 4 L42 14.5 V35.5 L23 46 L4 35.5 V14.5 Z" fill="var(--blue-300)" opacity="0.7"/>
+        <path d="M23 4 L42 14.5 L23 25 L4 14.5 Z" fill="var(--blue-100)"/>
+      </svg>
+    </div>
+    <div class="float-shape fs-2">
+      <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
+        <rect x="3" y="3" width="28" height="28" rx="6" fill="var(--blue-500)" opacity="0.55" transform="rotate(45 17 17)"/>
+      </svg>
+    </div>
+    <div class="float-shape fs-3">
+      <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+        <circle cx="20" cy="20" r="14" fill="none" stroke="var(--blue-700)" stroke-width="2" opacity="0.4"/>
+        <circle cx="20" cy="20" r="6" fill="var(--blue-700)" opacity="0.35"/>
+      </svg>
+    </div>
+    <div class="float-shape fs-4">
+      <svg width="30" height="30" viewBox="0 0 30 30" fill="none">
+        <path d="M15 2 L28 15 L15 28 L2 15 Z" fill="var(--blue-200)" opacity="0.6"/>
+      </svg>
+    </div>
+
+    <div class="container">
+      <!-- Hero 区域 -->
+      <div class="hero">
+        <div class="hero-inner">
+          <div class="hero-text">
+            <div class="avatar">
+              <svg width="52" height="52" viewBox="0 0 52 52" fill="none">
+                <!-- 头像内的等距小立方体 -->
+                <path d="M26 8 L42 17 V35 L26 44 L10 35 V17 Z" fill="#ffffff" opacity="0.95"/>
+                <path d="M26 8 L42 17 L26 26 L10 17 Z" fill="var(--blue-50)"/>
+                <path d="M10 17 L26 26 V44 L10 35 Z" fill="var(--blue-100)"/>
+              </svg>
+            </div>
+            <div class="hero-name">你的名字</div>
+            <p class="hero-tagline">「世界是破碎的几何，而我在缝隙里收集光。」</p>
+          </div>
+
+          <div class="hero-scene" aria-hidden="true"></div>
+        </div>
+      </div>
+
+      <!-- 想法流 -->
+      <h2 class="section-title">
+        <span class="tile"></span>
+        想法流
+      </h2>
+      <input type="search" class="thoughts-search" id="thoughtsSearch" placeholder="搜索帖子标题或内容…" aria-label="搜索帖子">
+
+      <div class="thoughts is-empty" id="thoughtsList">
+        <div class="empty-state" id="thoughtsEmpty">
+          <svg width="46" height="46" viewBox="0 0 46 46" fill="none">
+            <path d="M23 4 L42 14.5 V35.5 L23 46 L4 35.5 V14.5 Z" fill="var(--blue-100)" stroke="var(--blue-300)" stroke-width="1.5"/>
+            <path d="M23 4 L42 14.5 L23 25 L4 14.5 Z" fill="var(--blue-50)" stroke="var(--blue-300)" stroke-width="1.5"/>
+          </svg>
+          <p>这里还空着，点击右上角「＋ 新建帖子」写下第一条想法吧。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 相册 ============ -->
+  <section id="album" class="page">
+    <div class="container">
+      <div class="album-hero">
+        <h1>相 册</h1>
+        <p id="albumCount">还没有照片</p>
+      </div>
+
+      <div class="album-grid" id="albumGrid">
+        <div class="empty-state album-empty" id="albumEmpty">
+          <svg width="46" height="46" viewBox="0 0 46 46" fill="none">
+            <path d="M4 32 L18 18 L26 26 L34 20 L42 32 V40 H4 Z" fill="var(--blue-100)" stroke="var(--blue-300)" stroke-width="1.5"/>
+            <circle cx="32" cy="16" r="4" fill="var(--blue-50)" stroke="var(--blue-300)" stroke-width="1.5"/>
+          </svg>
+          <p>还没有照片，点击右上角「⬆ 上传照片」添加第一张吧。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 评论（Gitalk） ============ -->
+  <section id="comments" class="comments-section">
+    <div class="container">
+      <h2 class="section-title">
+        <span class="tile"></span>
+        评论
+      </h2>
+      <div id="gitalk-container"></div>
+    </div>
+  </section>
+
+  <!-- ============ 页脚 ============ -->
+  <footer>
+    <div class="geo-divider">
+      <span></span><span></span><span></span>
+    </div>
+    <p>© 2026 你的名字 · 在不可能的空间里，走自己的路。</p>
+  </footer>
+
+</main>
+
+<!-- ============ 新建帖子弹窗 ============ -->
+<div class="modal-overlay" id="postModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>新建帖子</h3>
+      <button class="modal-close" id="closePostModal" aria-label="关闭">✕</button>
+    </div>
+    <textarea id="postInput" placeholder="写下此刻的想法…" rows="5"></textarea>
+    <div class="modal-hint">Ctrl + Enter 快速发布</div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="cancelPost">取消</button>
+      <button class="btn-primary" id="publishPost">发布</button>
+    </div>
+  </div>
+</div>
+
+<!-- 隐藏的文件选择框 -->
+<input type="file" id="photoInput" accept="image/*" multiple hidden>
+
+<!-- 图片放大遮罩 -->
+<div class="lightbox" id="lightbox">
+  <button class="lightbox-close" id="lightboxClose" title="关闭">✕</button>
+  <button class="lightbox-nav lightbox-prev" id="lightboxPrev" title="上一张">‹</button>
+  <button class="lightbox-nav lightbox-next" id="lightboxNext" title="下一张">›</button>
+  <img id="lightboxImg" src="" alt="">
+</div>
+
+<!-- Toast 浮动提示容器 -->
+<div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
+<!-- 回到顶部按钮 -->
+<button class="back-to-top" id="backToTop" aria-label="回到顶部" style="display:none">↑</button>
+
+<script src="https://cdn.jsdelivr.net/npm/gitalk@1/dist/gitalk.min.js"></script>
+<script>
+  const gitalk = new Gitalk({
+    clientID: 'YOUR_GITHUB_CLIENT_ID',
+    // clientSecret 已迁移到 Pages Function 代理端（functions/gitalk-proxy.js），前端不再明文暴露
+    repo: 'YOUR_REPO_NAME',
+    owner: 'YOUR_GITHUB_USERNAME',
+    admin: ['YOUR_GITHUB_USERNAME'],
+    id: location.pathname,
+    distractionFreeMode: false,
+    // Pages Function 代理（与博客同域名，绕开 workers.dev 的 DNS 污染）
+    proxy: 'https://YOUR_DOMAIN/gitalk-proxy'
+  });
+  gitalk.render('gitalk-container');
+</script>
+
+<!-- ============ 岛屿 SVG（body 直系、position:fixed、视口绝对锚点） ============
+     独立挂 body 直系的目的：完全脱离 .hero-scene/.hero-inner/.hero 的 CSS 影响，
+     position:fixed 一定指视口，不会有任何祖先污染导致"看起来随滚动"。 -->
+<svg id="island-bg" viewBox="0 0 320 260" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- ===== 岛屿基座（侧面浸入海水） ===== -->
+  <!-- 左侧面（中调） -->
+  <path d="M48 156 L160 220 L160 240 L48 176 Z" fill="var(--blue-200)"/>
+  <!-- 右侧面（暗调） -->
+  <path d="M272 156 L160 220 L160 240 L272 176 Z" fill="var(--blue-300)"/>
+  <!-- 岛面（顶面，最亮） -->
+  <path d="M160 92 L272 156 L160 220 L48 156 Z" fill="var(--blue-100)"/>
+
+  <!-- ===== 台阶（塔前，两级等距阶梯） ===== -->
+  <path d="M146 178 L158 172 L170 178 L158 184 Z" fill="var(--blue-100)"/>
+  <path d="M158 184 L170 178 L170 184 L158 190 Z" fill="var(--blue-300)"/>
+  <path d="M158 184 L170 178 L182 184 L170 190 Z" fill="var(--blue-100)"/>
+  <path d="M170 190 L182 184 L182 190 L170 196 Z" fill="var(--blue-300)"/>
+
+  <!-- ===== 拱门（塔左前方，等距双柱+顶弧） ===== -->
+  <!-- 左柱 -->
+  <path d="M98 130 L105 134 L98 138 L91 134 Z" fill="var(--blue-100)"/>
+  <path d="M91 134 L98 138 L98 162 L91 158 Z" fill="var(--blue-200)"/>
+  <path d="M105 134 L98 138 L98 162 L105 158 Z" fill="var(--blue-300)"/>
+  <!-- 右柱 -->
+  <path d="M119 142 L126 146 L119 150 L112 146 Z" fill="var(--blue-100)"/>
+  <path d="M112 146 L119 150 L119 174 L112 170 Z" fill="var(--blue-200)"/>
+  <path d="M126 146 L119 150 L119 174 L126 170 Z" fill="var(--blue-300)"/>
+  <!-- 顶弧 -->
+  <path d="M98 128 Q108 114 126 144" stroke="var(--blue-300)" stroke-width="5" stroke-linecap="round" fill="none"/>
+  <!-- 拱内微光 -->
+  <ellipse cx="112" cy="136" rx="8" ry="6" fill="var(--blue-50)" class="arch-glow"/>
+
+  <!-- ===== 主塔（等距长方体 + 顶平台） ===== -->
+  <!-- 塔身左面（中调） -->
+  <path d="M118 84 L160 108 L160 172 L118 148 Z" fill="var(--blue-200)"/>
+  <!-- 塔身右面（暗调） -->
+  <path d="M202 84 L160 108 L160 172 L202 148 Z" fill="var(--blue-300)"/>
+  <!-- 塔顶面（最亮） -->
+  <path d="M160 60 L202 84 L160 108 L118 84 Z" fill="var(--blue-50)"/>
+  <!-- 塔顶小平台（等距小立方体） -->
+  <path d="M160 65 L176 74 L160 83 L144 74 Z" fill="var(--blue-100)"/>
+  <path d="M144 74 L160 83 L160 93 L144 84 Z" fill="var(--blue-200)"/>
+  <path d="M176 74 L160 83 L160 93 L176 84 Z" fill="var(--blue-300)"/>
+  <!-- 塔身圆窗（贴右面，呼吸光） -->
+  <ellipse cx="182" cy="122" rx="4.5" ry="7" fill="var(--blue-400)" transform="rotate(-30 182 122)" class="tower-window"/>
+
+  <!-- ===== 莫比乌斯环过道（塔右侧，种在岛面上，缓慢旋转） ===== -->
+  <g class="mobius-ring">
+    <!-- 支撑柱 -->
+    <path d="M195 144 L201 144 L201 164 L195 164 Z" fill="var(--blue-300)"/>
+    <!-- 环带主体 -->
+    <ellipse cx="198" cy="132" rx="24" ry="13" stroke="var(--blue-300)" stroke-width="7" fill="none"/>
+    <!-- 上缘高光 -->
+    <path d="M176 128 Q198 116 220 128" stroke="var(--blue-100)" stroke-width="3" stroke-linecap="round" fill="none"/>
+    <!-- 莫比乌斯交叉带（下缘扭向上） -->
+    <path d="M176 136 Q198 148 220 126" stroke="var(--blue-400)" stroke-width="5" stroke-linecap="round" fill="none"/>
+  </g>
+
+  <!-- ===== 海岸线（岛底浸水处，波浪拍岸） ===== -->
+  <g stroke="var(--blue-50)" stroke-width="2" fill="none" opacity="0.85" class="island-wave">
+    <path d="M48 178 Q88 196 128 216 Q144 224 160 232"/>
+    <path d="M160 232 Q200 212 240 192 Q256 184 272 178"/>
+  </g>
+  <!-- 浪花点缀 -->
+  <g stroke="var(--blue-50)" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.8">
+    <path d="M56 188 q5 -7 10 0"/>
+    <path d="M242 196 q5 -7 10 0"/>
+    <path d="M150 246 q5 -7 10 0"/>
+  </g>
+
+  <!-- ===== 漂浮装饰几何体（悬空，等距） ===== -->
+  <g class="island-float island-float-1">
+    <path d="M52 64 L62 70 L52 76 L42 70 Z" fill="var(--blue-100)"/>
+    <path d="M42 70 L52 76 L52 86 L42 80 Z" fill="var(--blue-200)"/>
+    <path d="M62 70 L52 76 L52 86 L62 80 Z" fill="var(--blue-300)"/>
+  </g>
+  <g class="island-float island-float-2">
+    <ellipse cx="258" cy="84" rx="10" ry="6" stroke="var(--blue-400)" stroke-width="2.5" fill="none"/>
+    <circle cx="258" cy="84" r="2.5" fill="var(--blue-400)"/>
+  </g>
+  <g class="island-float island-float-3">
+    <path d="M264 170 L277 193 L251 193 Z" fill="var(--blue-200)" stroke="var(--blue-400)" stroke-width="1.5"/>
+  </g>
+</svg>
+
+<!-- Markdown 渲染（想法流帖子 + 评论）：放 body 底部、app.js 之前，避免阻塞首屏渲染 -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="app.js?v=20260908-11"></script>
+
+</body>
+</html>

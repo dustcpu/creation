@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+
+# Build output
+dist/
+build/
+out/
+*.log
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editors
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local tooling
+.workbuddy/
+
+#==== Geometric Islands 项目本地私有文件，不上传GitHub ====
+backups/
+维护日志及须知/
+*.bat
+*.zip
