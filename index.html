@@ -24,6 +24,9 @@
 -->
 
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 L30 10 L16 18 L2 10 Z' fill='%233d7fc4'/%3E%3Cpath d='M2 10 L16 18 L16 30 L2 22 Z' fill='%2324558c'/%3E%3Cpath d='M30 10 L16 18 L16 30 L30 22 Z' fill='%2316324f'/%3E%3C/svg%3E">
+<!-- 预连接：数据源 api.github.com 走 CORS 请求需带 crossorigin；jsDelivr 是 <script src> 的 no-cors 请求，不带 -->
+<link rel="preconnect" href="https://api.github.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
 <title>几何岛屿 · 我的想法流</title>
 <link rel="stylesheet" href="style.css?v=20260912">
 <!-- Gitalk 评论样式 -->
@@ -318,7 +321,7 @@
 <script src="https://cdn.jsdelivr.net/npm/marked@18.0.12/marked.min.js" defer></script>
 <!-- XSS 净化：marked 产出的 HTML 经 DOMPurify 过滤后再插入页面 -->
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js" defer></script>
-<script src="app.js?v=20260912" defer></script>
+<script src="app.js?v=20260912-2" defer></script>
 
 </body>
 </html>

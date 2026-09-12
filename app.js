@@ -770,6 +770,10 @@
         btn.classList.toggle('liked', likedIssues.has(number));
         btn.querySelector('.like-count').textContent = count;
       }
+      // 同步写回内容缓存：否则 TTL 内刷新页面会先显示缓存的旧点赞数（后台刷新才纠正）
+      var th = thoughts.find(function (t) { return t.number === number; });
+      if (th) th.likeCount = count;
+      writeContentCache();
     } catch (e) {
       console.error('点赞失败', e);
       showToast('点赞失败：' + (e.message || '未知错误'), 'error');
@@ -1158,12 +1162,30 @@
   };
 
   var themeMode = 'day';
+  // 初始季节按真实月份（3~5 春 / 6~8 夏 / 9~11 秋 / 12,1,2 冬），不再按访问小时猜
   var themeSeason = (function () {
-    var h = new Date().getHours();
-    if (h >= 3 && h < 9) return 'spring';
-    if (h >= 9 && h < 15) return 'summer';
-    if (h >= 15 && h < 21) return 'autumn';
+    var m = new Date().getMonth();
+    if (m >= 2 && m <= 4) return 'spring';
+    if (m >= 5 && m <= 7) return 'summer';
+    if (m >= 8 && m <= 10) return 'autumn';
     return 'winter';
+  })();
+  // 主题初始化三级回退：历史选择 → 系统昼夜偏好 → 默认（昼 + 当前月份季节）
+  (function restoreTheme() {
+    var saved = null;
+    try { saved = JSON.parse(safeStorageGet('GT_THEME') || 'null'); } catch (e) { saved = null; }
+    if (saved && saved.mode === 'night') {
+      themeMode = 'night';
+      if (SEASON_COLORS[saved.season]) themeSeason = saved.season;   // 夜间的季节仅作记录，配色不随季节变
+      return;
+    }
+    if (saved && SEASON_COLORS[saved.season]) {
+      themeSeason = saved.season;
+      return;
+    }
+    try {
+      if (window.matchMedia('(prefers-color-scheme: dark)').matches) themeMode = 'night';
+    } catch (e) { /* 不支持系统偏好则保持默认昼 */ }
   })();
 
   function getTargetColors() {
@@ -1193,10 +1215,16 @@
     }
   }
 
+  // 主题选择持久化：setThemeMode / setThemeSeason 时写 GT_THEME，进站时 restoreTheme 恢复
+  function saveThemePref() {
+    safeStorageSet('GT_THEME', JSON.stringify({ mode: themeMode, season: themeSeason }));
+  }
+
   function setThemeMode(mode) {
     themeMode = mode;
     applyThemeClasses();
     updateThemePanel();
+    saveThemePref();
   }
   function setThemeSeason(s) {
     themeSeason = s;
@@ -1205,6 +1233,7 @@
     document.body.classList.add('no-theme-transition');
     applyThemeClasses();
     updateThemePanel();
+    saveThemePref();
     requestAnimationFrame(function () {
       requestAnimationFrame(function () {
         document.body.classList.remove('no-theme-transition');
