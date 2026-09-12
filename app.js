@@ -22,7 +22,8 @@
 
   // ==================== Markdown 渲染配置 ====================
   // 想法流帖子和评论内容用 marked 渲染（GitHub 风格 Markdown）。
-  // 内容均来自 GitHub Issues/Comments（可信来源），marked 输出直接插入 innerHTML。
+  // 注意：这些内容来自 GitHub Issues/Comments，**任何 GitHub 登录用户都能写入**，属不可信输入。
+  // 所以 marked 的输出不能直接插入 innerHTML —— 必须先经 DOMPurify 净化（见 renderMd）。
   if (window.marked) {
     marked.setOptions({
       gfm: true,         // GitHub 风格 Markdown（表格、删除线、任务列表等）
@@ -33,10 +34,18 @@
   }
   function renderMd(text) {
     if (!text) return '';
+    var html;
     if (window.marked) {
-      try { return marked.parse(text); } catch (e) { return nl2br(text); }
+      try { html = marked.parse(text); } catch (e) { return nl2br(text); }
+    } else {
+      return nl2br(text);  // marked 加载失败时回退到纯换行（内部已转义，安全）
     }
-    return nl2br(text);  // marked 加载失败时回退到纯换行
+    // XSS 净化：剥除 <script>、on* 事件、javascript: 链接等危险内容后再插入页面
+    if (window.DOMPurify) {
+      try { return DOMPurify.sanitize(html); } catch (e) { return nl2br(text); }
+    }
+    // DOMPurify 未加载时宁可退化为纯文本，也不渲染未净化的 HTML
+    return nl2br(text);
   }
 
   // ==================== Toast 浮动提示 ====================
@@ -105,15 +114,22 @@
       + ' · ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
 
+  // 全局兜底：未被局部 try/catch 捕获的 Promise 异常统一记日志，避免静默失败
+  window.addEventListener('unhandledrejection', function (ev) {
+    console.error('[几何岛屿] 未处理的异步错误：', ev && ev.reason);
+  });
+
   // ==================== 页面切换（hash 路由） ====================
   const pages = document.querySelectorAll('.page');
   const links = document.querySelectorAll('.nav-links a');
   const VALID_PAGES = ['home', 'album'];
+  const PAGE_TITLES = { home: '几何岛屿 · 我的想法流', album: '相册 · 几何岛屿' };
   function showPage(name) {
     // 无效 hash 回退到首页，避免所有 .page 都丢失 active 导致空白页
     if (VALID_PAGES.indexOf(name) === -1) name = 'home';
     pages.forEach(p => p.classList.toggle('active', p.id === name));
     links.forEach(a => a.classList.toggle('active', a.dataset.page === name));
+    document.title = PAGE_TITLES[name] || PAGE_TITLES.home;  // 标签页标题随路由更新
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
   links.forEach(a => {
@@ -149,12 +165,35 @@
   const photoInput = document.getElementById('photoInput');
 
   // ==================== GitHub API 封装 ====================
-  async function ghRequest(path, opts) {
+  // 判断是否触发 GitHub 限流：429，或匿名额度耗尽时的 403（X-RateLimit-Remaining=0）
+  function isRateLimited(res) {
+    if (res.status === 429) return true;
+    if (res.status === 403 && res.headers.get('X-RateLimit-Remaining') === '0') return true;
+    return false;
+  }
+  // 真正发起请求：遇限流读 Retry-After 自动等待并重试一次
+  async function ghFetch(path, opts) {
     opts = opts || {};
-    const headers = Object.assign({}, opts.headers || {});
-    if (accessToken) headers['Authorization'] = 'token ' + accessToken;
-    headers['Accept'] = 'application/vnd.github.v3+json';
-    const res = await fetch(GH_API + path, Object.assign({}, opts, { headers: headers }));
+    const buildHeaders = function () {
+      const headers = Object.assign({}, opts.headers || {});
+      if (accessToken) headers['Authorization'] = 'token ' + accessToken;
+      headers['Accept'] = 'application/vnd.github.v3+json';
+      return headers;
+    };
+    let res = await fetch(GH_API + path, Object.assign({}, opts, { headers: buildHeaders() }));
+    if (isRateLimited(res)) {
+      const ra = parseInt(res.headers.get('Retry-After') || '', 10);
+      const waitMs = (!isNaN(ra) && ra > 0) ? Math.min(ra * 1000, 5000) : 1500;
+      await new Promise(function (r) { setTimeout(r, waitMs); });  // 退避后重试一次
+      res = await fetch(GH_API + path, Object.assign({}, opts, { headers: buildHeaders() }));
+      if (isRateLimited(res) && typeof showToast === 'function') {
+        showToast('GitHub 请求过于频繁，请稍后再试', 'warning');
+      }
+    }
+    return res;
+  }
+  async function ghRequest(path, opts) {
+    const res = await ghFetch(path, opts);
     if (res.status === 204) return null;
     let data = null;
     try { data = await res.json(); } catch (e) { data = {}; }
@@ -164,6 +203,34 @@
       throw err;
     }
     return data;
+  }
+  // 从 Link 头解析 rel="next"，并把绝对 URL 还原为 GH_API 相对路径
+  function nextPagePath(linkHeader) {
+    if (!linkHeader) return null;
+    const m = linkHeader.match(/<([^>]+)>\s*;\s*rel="next"/);
+    if (!m) return null;
+    const url = m[1];
+    return url.indexOf(GH_API) === 0 ? url.slice(GH_API.length) : url;
+  }
+  // 列表接口自动翻页：跟随 rel="next" 拉完全部页并合并（上限 10 页防异常死循环）
+  async function ghRequestAll(path, opts) {
+    let all = [];
+    let nextPath = path;
+    let guard = 0;
+    while (nextPath && guard < 10) {
+      guard++;
+      const res = await ghFetch(nextPath, opts);
+      let page = null;
+      try { page = await res.json(); } catch (e) { page = []; }
+      if (!res.ok) {
+        const err = new Error((page && page.message) || ('GitHub API ' + res.status));
+        err.status = res.status;
+        throw err;
+      }
+      if (Array.isArray(page)) all = all.concat(page);
+      nextPath = nextPagePath(res.headers.get('Link'));
+    }
+    return all;
   }
 
   // ==================== 登录 / 用户 ====================
@@ -246,11 +313,20 @@
   }, true);
 
   // ==================== 渲染：想法流 ====================
+  // 「显示更多」分页：一次渲染 10 篇，点按钮再多渲染 10 篇；
+  // 搜索时不分页（直接展示全部匹配），方便一眼看完结果。
+  var THOUGHTS_PAGE_SIZE = 10;
+  var thoughtsShown = THOUGHTS_PAGE_SIZE;
+
   function renderThoughts() {
     const isEmpty = thoughts.length === 0;
     thoughtsList.classList.toggle('is-empty', isEmpty);
     thoughtsEmpty.style.display = isEmpty ? 'block' : 'none';
     thoughtsList.querySelectorAll('.thought').forEach(el => el.remove());
+    var moreBtn = document.getElementById('thoughtsMoreBtn');
+    if (moreBtn) moreBtn.remove();
+    var noMatch = document.getElementById('thoughtsNoMatch');
+    if (noMatch) noMatch.remove();
 
     // 搜索过滤：标题 + 正文模糊匹配
     var kw = (thoughtsSearch.value || '').trim().toLowerCase();
@@ -261,13 +337,22 @@
         })
       : thoughts;
 
-    filtered.forEach(function (t) {
+    if (kw && filtered.length === 0) {
+      var hint = document.createElement('div');
+      hint.id = 'thoughtsNoMatch';
+      hint.className = 'load-hint';
+      hint.textContent = '没有匹配的帖子';
+      thoughtsList.insertBefore(hint, thoughtsEmpty);
+    }
+
+    var visible = kw ? filtered : filtered.slice(0, thoughtsShown);
+    visible.forEach(function (t) {
       const art = document.createElement('article');
       art.className = 'thought';
       const liked = likedIssues.has(t.number);
       art.innerHTML =
         '<span class="thought-date">' + escapeHtml(t.date) + '</span>' +
-        '<p>' + renderMd(t.text) + '</p>' +
+        '<div class="md">' + renderMd(t.text) + '</div>' +
         '<div class="post-actions">' +
           '<button class="post-action-btn like-btn' + (liked ? ' liked' : '') + '" data-n="' + t.number + '" title="点赞">' +
             '<span>👍</span><span class="like-count">' + t.likeCount + '</span>' +
@@ -290,6 +375,19 @@
       const editPostBtn = art.querySelector('.edit-btn');
       if (editPostBtn) editPostBtn.addEventListener('click', function () { openEditPostModal(t); });
     });
+
+    // 还有剩余且不在搜索态时，尾部挂「显示更多」按钮
+    if (!kw && filtered.length > thoughtsShown) {
+      var more = document.createElement('button');
+      more.id = 'thoughtsMoreBtn';
+      more.className = 'btn-ghost thoughts-more-btn';
+      more.textContent = '显示更多（还有 ' + (filtered.length - thoughtsShown) + ' 篇）';
+      more.addEventListener('click', function () {
+        thoughtsShown += THOUGHTS_PAGE_SIZE;
+        renderThoughts();
+      });
+      thoughtsList.insertBefore(more, thoughtsEmpty);
+    }
   }
 
   // 搜索框实时过滤（带简单防抖）
@@ -309,23 +407,77 @@
     photos.forEach(function (p, idx) {
       const div = document.createElement('div');
       div.className = 'photo';
+      // 网格用 ~400px 缩略图，灯箱才加载原图（省流量、加快首屏）。
+      // 缩略图路径与原图同名加 thumb_ 前缀；旧照片没有缩略图，onerror 回退原图。
+      var thumbSrc = p.path
+        ? 'https://cdn.jsdelivr.net/gh/' + CONFIG.owner + '/' + CONFIG.repo + '@' + CONFIG.branch + '/' + p.path.replace('photos/', 'photos/thumb_')
+        : '';
       div.innerHTML =
-        '<img src="' + escapeHtml(p.src) + '" alt="相册照片：' + escapeHtml(p.title) + '，拍摄于 ' + escapeHtml(p.date) + '" loading="lazy" decoding="async" class="lightbox-target">' +
+        '<img src="' + escapeHtml(thumbSrc || p.src) + '" data-full="' + escapeHtml(p.src) + '" alt="相册照片：' + escapeHtml(p.title) + '，拍摄于 ' + escapeHtml(p.date) + '" loading="lazy" decoding="async" class="lightbox-target">' +
         '<div class="photo-caption">' + escapeHtml(p.title) + '<small>' + escapeHtml(p.date) + '</small></div>' +
         (isAdmin() ? '<button class="photo-delete-btn" data-n="' + p.number + '" data-path="' + escapeHtml(p.path || '') + '" title="删除照片">✕</button>' : '');
       albumGrid.insertBefore(div, albumEmpty);
-      div.querySelector('img.lightbox-target').addEventListener('click', function () { openLightbox(p.src, idx); });
+      var img = div.querySelector('img.lightbox-target');
+      img.addEventListener('error', function () {
+        if (thumbSrc && img.src.indexOf('thumb_') > -1) img.src = p.src;   // 缩略图不存在（旧照片）→ 回退原图
+      });
+      img.addEventListener('click', function () { openLightbox(p.src, idx); });
       const delPhotoBtn = div.querySelector('.photo-delete-btn');
       if (delPhotoBtn) delPhotoBtn.addEventListener('click', function (e) { e.stopPropagation(); deletePhoto(p.number, p.path, div); });
     });
   }
 
+  // ==================== 内容缓存（TTL 10 分钟） ====================
+  // 想法流 / 相册 / 漂流瓶评论池带时间戳存入 localStorage：
+  // ① 缓存新鲜期内，首屏先即时渲染缓存内容，后台仍会刷新一次保持数据最新；
+  // ② 加载失败且无内容时，回退展示过期缓存（标注"可能不是最新"）；
+  // ③ 评论池随缓存复用，缓存新鲜期内不再发起每帖一条的预取请求（缓解 N+1）。
+  var CACHE_TTL = 10 * 60 * 1000;
+  var CACHE_KEY = 'GT_CONTENT_CACHE';
+  function readContentCache(ignoreTtl) {
+    var raw = safeStorageGet(CACHE_KEY);
+    if (!raw) return null;
+    try {
+      var data = JSON.parse(raw);
+      if (!data || !data.savedAt) return null;
+      if (!ignoreTtl && Date.now() - data.savedAt > CACHE_TTL) return null;
+      return data;
+    } catch (e) { return null; }
+  }
+  function writeContentCache() {
+    try {
+      safeStorageSet(CACHE_KEY, JSON.stringify({
+        savedAt: Date.now(),
+        thoughts: thoughts,
+        photos: photos,
+        allComments: allComments.slice(0, 500)   // 评论池封顶，防长评论把存储额度撑爆
+      }));
+    } catch (e) { /* 存储不可用 / 超限时静默跳过，不影响正常流程 */ }
+  }
+
+  // 在空状态容器里追加「重试」按钮：加载失败时给用户一个不刷页的出路
+  function showLoadRetry(container, fn) {
+    var old = document.getElementById('loadRetryBtn');
+    if (old) old.remove();
+    var btn = document.createElement('button');
+    btn.id = 'loadRetryBtn';
+    btn.className = 'btn-ghost empty-retry-btn';
+    btn.textContent = '重试';
+    btn.addEventListener('click', function () { btn.disabled = true; fn(); });
+    container.appendChild(btn);
+  }
+  function clearLoadRetry() {
+    var old = document.getElementById('loadRetryBtn');
+    if (old) old.remove();
+  }
+
   // ==================== 数据加载 ====================
   async function loadThoughts() {
+    clearLoadRetry();
     thoughtsEmpty.classList.add('loading');
     thoughtsEmpty.querySelector('p').textContent = '加载中…';
     try {
-      const issues = await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/issues?labels=post&state=open&per_page=100&t=' + Date.now());
+      const issues = await ghRequestAll('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/issues?labels=post&state=open&per_page=100&t=' + Date.now());  // 自动翻页，突破单页 100 条上限
       thoughts = issues.map(function (issue) {
         return {
           number: issue.number,
@@ -337,20 +489,35 @@
         };
       });
       thoughtsEmpty.querySelector('p').textContent = '这里还空着，点击右上角「＋ 新建帖子」写下第一条想法吧。';
+      writeContentCache();
     } catch (e) {
       console.error('加载帖子失败', e);
-      thoughts = [];
-      thoughtsEmpty.querySelector('p').textContent = '加载失败，请刷新页面重试。';
+      if (!thoughts.length) {
+        // 无任何内容：先试过期缓存兜底，再考虑显示重试按钮
+        var stale = readContentCache(true);
+        if (stale && (stale.thoughts || []).length) {
+          thoughts = stale.thoughts;
+          thoughtsEmpty.querySelector('p').textContent = '网络异常，正在显示上次的内容（可能不是最新）。';
+          // 故意不 writeContentCache：保持原 savedAt，不给过期数据"续命"
+        }
+      }
+      if (!thoughts.length) {
+        thoughtsEmpty.querySelector('p').textContent = '加载失败，请刷新页面重试。';
+        showLoadRetry(thoughtsEmpty, loadThoughts);
+      } else {
+        showToast('帖子刷新失败，正在显示缓存内容', 'warning');
+      }
     }
     thoughtsEmpty.classList.remove('loading');
     renderThoughts();
   }
 
   async function loadPhotos() {
+    clearLoadRetry();
     albumEmpty.classList.add('loading');
     try {
       // 显式指定 sort=created&direction=desc（最新在前），不依赖 API 默认返回顺序。
-      const issues = await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/issues?labels=photo&state=open&per_page=100&sort=created&direction=desc&t=' + Date.now());
+      const issues = await ghRequestAll('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/issues?labels=photo&state=open&per_page=100&sort=created&direction=desc&t=' + Date.now());  // 自动翻页，突破单页 100 条上限
       photos = issues.map(function (issue) {
         var src = (issue.body || '').trim();
         var path = '';
@@ -362,15 +529,36 @@
       }).filter(function (p) { return p.src; });
       // 双保险：在前端再按创建时间降序排一次，确保最新上传的照片始终在最前面。
       photos.sort(function (a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
+      writeContentCache();
     } catch (e) {
       console.error('加载照片失败', e);
-      photos = [];
+      if (!photos.length) {
+        var stale = readContentCache(true);
+        if (stale && (stale.photos || []).length) {
+          photos = stale.photos;
+          albumCount.textContent = '网络异常，正在显示上次的 ' + photos.length + ' 张照片（可能不是最新）';
+        }
+      }
+      if (!photos.length) {
+        showLoadRetry(albumEmpty, loadPhotos);
+      } else {
+        showToast('相册刷新失败，正在显示缓存内容', 'warning');
+      }
     }
     albumEmpty.classList.remove('loading');
     renderAlbum();
   }
 
-  // ==================== 漂流瓶评论池预加载 ====================
+  // ==================== 漂流瓶评论池 ====================
+  // 合并评论进内容池（按 id 去重）。三处调用：预加载 / 展开评论区 / 发送评论成功后。
+  function addCommentsToPool(comments) {
+    (comments || []).forEach(function (c) {
+      if (c && c.body && !allComments.some(function (ec) { return ec.id === c.id; })) {
+        allComments.push({ id: c.id, body: c.body });
+      }
+    });
+  }
+
   // 首屏自动把每个帖子的评论合并进 allComments，
   // 悬停漂流瓶无需用户手动点开评论区即可抽到真实评论。
   async function loadAllComments() {
@@ -384,14 +572,11 @@
             const comments = await ghRequest(
               '/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/issues/' + t.number + '/comments?per_page=100'
             );
-            (comments || []).forEach(function (c) {
-              if (c && c.body && !allComments.some(function (ec) { return ec.id === c.id; })) {
-                allComments.push({ id: c.id, body: c.body });
-              }
-            });
+            addCommentsToPool(comments);
           } catch (e) { /* 单个帖子失败不影响其余 */ }
         }));
       }
+      writeContentCache();   // 评论池更新后同步进缓存
     } catch (e) {
       console.error('预加载漂流瓶评论失败', e);
     }
@@ -417,11 +602,34 @@
     lightboxPrev.disabled = currentPhotoIndex <= 0;
     lightboxNext.disabled = currentPhotoIndex >= photos.length - 1;
   }
+  // 统一设置大图：加载失败时显示占位提示（内联样式，不改 style.css）
+  function setLightboxSrc(src, alt) {
+    var oldHint = document.getElementById('lightboxFail');
+    if (oldHint) oldHint.remove();
+    lightboxImg.style.opacity = '';
+    lightboxImg.alt = alt || '';
+    lightboxImg.onload = function () {
+      lightboxImg.style.opacity = '';
+      var hint = document.getElementById('lightboxFail');
+      if (hint) hint.remove();
+    };
+    lightboxImg.onerror = function () {
+      lightboxImg.onerror = null;
+      lightboxImg.style.opacity = '0';
+      if (!document.getElementById('lightboxFail')) {
+        var d = document.createElement('div');
+        d.id = 'lightboxFail';
+        d.textContent = '图片加载失败';
+        d.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,.85);font-size:15px;letter-spacing:.15em;pointer-events:none;';
+        lightbox.appendChild(d);
+      }
+    };
+    lightboxImg.src = src;
+  }
   function showPhoto(idx) {
     if (idx < 0 || idx >= photos.length) return;
     currentPhotoIndex = idx;
-    lightboxImg.src = photos[idx].src;
-    lightboxImg.alt = photos[idx].title || '';
+    setLightboxSrc(photos[idx].src, photos[idx].title || '');
     updateLightboxNav();
   }
   function prevPhoto() { showPhoto(currentPhotoIndex - 1); }
@@ -430,7 +638,7 @@
     if (typeof idx === 'number' && idx >= 0 && idx < photos.length) {
       showPhoto(idx);
     } else {
-      lightboxImg.src = src;
+      setLightboxSrc(src, '');
       currentPhotoIndex = -1;
       lightboxPrev.disabled = true;
       lightboxNext.disabled = true;
@@ -441,7 +649,13 @@
   function closeLightbox() {
     lightbox.classList.remove('show');
     document.body.style.overflow = '';
-    setTimeout(function () { lightboxImg.src = ''; }, 250);
+    setTimeout(function () {
+      lightboxImg.src = '';
+      lightboxImg.onload = null;
+      lightboxImg.onerror = null;
+      var hint = document.getElementById('lightboxFail');
+      if (hint) hint.remove();
+    }, 250);
   }
 
   // ==================== 回到顶部按钮 ====================
@@ -491,6 +705,11 @@
       if (path) {
         var fileInfo = await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/contents/' + path);
         await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/contents/' + path, { method: 'DELETE', body: JSON.stringify({ message: '删除照片 ' + path, sha: fileInfo.sha, branch: CONFIG.branch }) });
+        // 顺带清理缩略图（旧照片可能没有，404 时静默跳过）
+        try {
+          var thumbInfo = await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/contents/' + path.replace('photos/', 'photos/thumb_'));
+          await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/contents/' + path.replace('photos/', 'photos/thumb_'), { method: 'DELETE', body: JSON.stringify({ message: '删除缩略图 thumb_' + path.slice(7), sha: thumbInfo.sha, branch: CONFIG.branch }) });
+        } catch (e2) { /* 无缩略图，跳过 */ }
       }
       await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/issues/' + number, { method: 'PATCH', body: JSON.stringify({ state: 'closed' }) });
       if (photoEl) photoEl.remove();
@@ -523,26 +742,30 @@
     if (!currentUser) { login(); return; }
     const btn = thoughtsList.querySelector('.like-btn[data-n="' + number + '"]');
     try {
-      const reactions = await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/issues/' + number + '/reactions');
+      const reactions = await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/issues/' + number + '/reactions?per_page=100');
       const mine = (reactions || []).find(function (r) {
         return r.user && r.user.login.toLowerCase() === currentUser.login.toLowerCase() && r.content === '+1';
       });
+      var added;
       if (mine) {
         await fetch(GH_API + '/reactions/' + mine.id, {
           method: 'DELETE',
           headers: { 'Authorization': 'token ' + accessToken, 'Accept': 'application/vnd.github.v3+json' },
         });
         likedIssues.delete(number);
+        added = false;
       } else {
         await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/issues/' + number + '/reactions', {
           method: 'POST',
           body: JSON.stringify({ content: '+1' }),
         });
         likedIssues.add(number);
+        added = true;
       }
       safeStorageSet('GT_LIKED_ISSUES', JSON.stringify(Array.from(likedIssues)));
-      const issue = await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/issues/' + number);
-      const count = (issue.reactions && issue.reactions['+1']) || 0;
+      // 计数直接由刚拉到的 reactions 列表推算（过滤 +1 再 ±1），省掉重查 issue 的一次往返
+      const count = Math.max(0,
+        (reactions || []).filter(function (r) { return r && r.content === '+1'; }).length + (added ? 1 : -1));
       if (btn) {
         btn.classList.toggle('liked', likedIssues.has(number));
         btn.querySelector('.like-count').textContent = count;
@@ -565,12 +788,7 @@
     try {
       const comments = await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/issues/' + number + '/comments?per_page=100');
       renderComments(container, comments || []);
-      // 合并到漂流瓶内容池（按 id 去重）
-      (comments || []).forEach(function(c) {
-        if (c && c.body && !allComments.some(function(ec) { return ec.id === c.id; })) {
-          allComments.push({ id: c.id, body: c.body });
-        }
-      });
+      addCommentsToPool(comments);
     } catch (e) {
       container.innerHTML = '<div class="load-hint">评论加载失败</div>';
     }
@@ -688,12 +906,7 @@
       });
       const comments = await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/issues/' + number + '/comments?per_page=100');
       renderComments(container, comments || []);
-      // 合并到漂流瓶内容池（按 id 去重）
-      (comments || []).forEach(function(c) {
-        if (c && c.body && !allComments.some(function(ec) { return ec.id === c.id; })) {
-          allComments.push({ id: c.id, body: c.body });
-        }
-      });
+      addCommentsToPool(comments);
       const btn = thoughtsList.querySelector('.comment-btn[data-n="' + number + '"]');
       if (btn) btn.querySelector('.comment-count').textContent = (comments || []).length;
     } catch (e) {
@@ -828,6 +1041,21 @@
           }),
         });
         const imageUrl = 'https://cdn.jsdelivr.net/gh/' + CONFIG.owner + '/' + CONFIG.repo + '@' + CONFIG.branch + '/' + path;
+        // 同步生成并上传 ~400px 缩略图（相册网格展示用，灯箱仍用原图）。
+        // 失败不阻断主流程：网格 onerror 会回退原图，只是那一张稍微费流量。
+        try {
+          const thumbDataUrl = await compressImage(file, 400, 0.7);
+          await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/contents/photos/thumb_' + filename, {
+            method: 'PUT',
+            body: JSON.stringify({
+              message: '上传缩略图 thumb_' + filename,
+              content: thumbDataUrl.split(',')[1],
+              branch: CONFIG.branch,
+            }),
+          });
+        } catch (thumbErr) {
+          console.warn('缩略图上传失败（不影响原图）', thumbErr);
+        }
         const title = file.name.replace(/\.[^.]+$/, '') || '照片';
         await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo + '/issues', {
           method: 'POST',
@@ -869,8 +1097,18 @@
     await fetchUser();
     updateNav();
     refreshAdminUI();
+    // 缓存命中：先即时渲染，再让下面的加载函数走网络刷新（用户无感知地换新数据）
+    var cached = readContentCache();
+    if (cached) {
+      thoughts = cached.thoughts || [];
+      photos = cached.photos || [];
+      allComments = cached.allComments || [];
+      renderThoughts();
+      renderAlbum();
+    }
     await Promise.all([loadThoughts(), loadPhotos()]);
-    loadAllComments();   // 预加载漂流瓶评论池，不阻塞首屏渲染
+    // 评论池预取（每帖一条请求）：缓存已带回评论池时跳过，省掉这批 N+1 请求
+    if (!allComments.length) loadAllComments();
     refreshAdminUI();
   }
 
@@ -986,6 +1224,16 @@
   });
   updateThemePanel();
 
+  // 移动端没有 hover：平时面板只露出 14px 边条，点边条即可展开/收起（桌面 hover 行为不变）。
+  // 点在主题按钮上时不切换展开态——那是选主题，不是开合面板；选中后面板保持展开，方便连续试色。
+  var themePanelEl = document.getElementById('themePanel');
+  if (themePanelEl) {
+    themePanelEl.addEventListener('click', function (e) {
+      if (e.target && e.target.closest && e.target.closest('.theme-btn')) return;
+      themePanelEl.classList.toggle('open');
+    });
+  }
+
   // ==================== 首页海洋背景（等距俯视海面） ====================
   // 仅在首页（#home 激活）时绘制并显示；鼠标在海面停留 1.5s 浮出随机几何体，移开 1s 内沉回。
   (function initOcean() {
@@ -1011,7 +1259,8 @@
     var TILE_H = 26;   // 菱形垂直半高
 
     // ---- 漂流几何体（drifter）----
-    var DRIFTER_COUNT = 10;
+    // 注意：数量是动态的（见 initDrifters），不存在常量；早期版本曾有 DRIFTER_COUNT=10，
+    // 仅定义无引用，已删除。
     var DRIFT_SPEED_MIN = 14;   // px/s，缓慢漂流
     var DRIFT_SPEED_MAX = 22;
     var DRIFT_SCALE_MIN = 0.62; // 比悬停几何体(A=28)略小
@@ -1038,6 +1287,8 @@
     var TRANSITION_HALF = 3;   // 水上/水下柔和过渡带半高(px)
     var drifters = [];
     var stars = [];
+    var meteor = null;       // 夜间流星（低频点缀，同时最多一颗）
+    var nextMeteorAt = 0;    // 下一颗流星的出现时刻（白天持续顺延，入夜稳定后 8~20s 首颗）
     var splashPool = [];   // 水花粒子池
     var ripplePool = [];   // 涟漪环池
 
@@ -1186,13 +1437,15 @@
     // 鼠标事件监听在 window 上（而不是 canvas）——因为 canvas 的 z-index:-1 位于最底层，
     // 被 body 内容与导航栏覆盖，永远收不到 mousemove/mouseleave 事件，导致几何体无法浮出。
     var entered = false;
-    window.addEventListener('mousemove', function (e) {
+    var lastTouchEnd = 0;   // 触摸结束后短暂屏蔽浏览器合成的事件，避免松手后误浮出瓶子
+    // 鼠标与触摸共用：px / py 为视口坐标（函数体内统一用 mouse.x / mouse.y）
+    function handlePointer(px, py) {
       if (!home.classList.contains('active')) return;   // 仅首页
       if (!entered) {
         entered = true;
       }
-      mouse.x = e.clientX;
-      mouse.y = e.clientY;
+      mouse.x = px;
+      mouse.y = py;
 
       // 情况B：检测鼠标是否悬停在某个漂流几何体上（仅海洋范围内生效）
       var hitDrifter = null;
@@ -1236,7 +1489,44 @@
           sink();
         }
       }
+    }
+    window.addEventListener('mousemove', function (e) {
+      if (Date.now() - lastTouchEnd < 500) return;      // 忽略触摸后浏览器补发的事件
+      handlePointer(e.clientX, e.clientY);
     });
+
+    // ---- 移动端触摸支持 ----
+    // 桌面是「悬停 0.8s」，手机没有悬停，改用「长按 0.8s」：
+    // 手指落下即开始计时；移动超过 12px 判定为滚动并取消；抬起/中断即收起。
+    var TOUCH_MOVE_CANCEL = 12;
+    var touchOrigin = null;
+    function cancelTouchBottle() {
+      touchOrigin = null;
+      clearTimeout(hoverTimer);
+      sink();
+      for (var ti = 0; ti < drifters.length; ti++) drifters[ti].hovered = false;
+    }
+    window.addEventListener('touchstart', function (e) {
+      if (e.touches.length !== 1) return;               // 多指手势不参与
+      var t = e.touches[0];
+      touchOrigin = { x: t.clientX, y: t.clientY };
+      handlePointer(t.clientX, t.clientY);              // 触发一次即启动 0.8s 计时
+    }, { passive: true });
+    window.addEventListener('touchmove', function (e) {
+      if (!touchOrigin || e.touches.length !== 1) return;
+      var t = e.touches[0];
+      var dx = t.clientX - touchOrigin.x, dy = t.clientY - touchOrigin.y;
+      if (dx * dx + dy * dy > TOUCH_MOVE_CANCEL * TOUCH_MOVE_CANCEL) cancelTouchBottle();
+    }, { passive: true });
+    window.addEventListener('touchend', function () {
+      lastTouchEnd = Date.now();
+      cancelTouchBottle();
+    }, { passive: true });
+    window.addEventListener('touchcancel', function () {
+      lastTouchEnd = Date.now();
+      cancelTouchBottle();
+    }, { passive: true });
+
     window.addEventListener('mouseout', function (e) {
       if (!e.relatedTarget) {          // 鼠标离开窗口
         entered = false;
@@ -1638,13 +1928,17 @@
       d.phase = 'rising';   // 从海洋左边界水下开始上浮
     }
 
-    // 漂流瓶：从评论池随机抽取一条文本
+    // 漂流瓶：从评论池随机抽取一条文本。
+    // 气泡只显示摘要（上限 120 字）：评论可能很长，全塞进气泡会竖着糊满大半屏幕。
+    var BOTTLE_TEXT_MAX = 120;
     function pickBottleText() {
-      if (!allComments || allComments.length === 0) {
-        return '💬 还没有评论，来说点什么吧！';
-      }
+      var fallback = '💬 还没有评论，来说点什么吧！';
+      if (!allComments || allComments.length === 0) return fallback;
       var c = allComments[(Math.random() * allComments.length) | 0];
-      return (c && c.body) ? c.body.trim() : '💬 还没有评论，来说点什么吧！';
+      var body = (c && c.body) ? c.body.trim() : '';
+      if (!body) return fallback;
+      if (body.length > BOTTLE_TEXT_MAX) return body.slice(0, BOTTLE_TEXT_MAX) + '…';
+      return body;
     }
 
     function updateDrifters(dt, t) {
@@ -2141,6 +2435,64 @@
         }
       }
 
+      // ---- 夜间流星（低频点缀：入夜后每 20~40s 一颗，向右下划向海面方向）----
+      if (themeDisplay.glow > 0.9 && !REDUCED_MOTION) {
+        if (!meteor && t > nextMeteorAt) {
+          var mAng = 0.35 + Math.random() * 0.5;   // 俯角约 20°~49°
+          meteor = {
+            x: W * (0.1 + Math.random() * 0.55),
+            y: H * (0.04 + Math.random() * 0.18),
+            dx: Math.cos(mAng), dy: Math.sin(mAng),
+            spd: 320 + Math.random() * 200,        // px/s
+            len: 90 + Math.random() * 60,          // 尾迹长度
+            t: 0,
+            life: 0.9 + Math.random() * 0.4
+          };
+        }
+        if (meteor) {
+          meteor.t += dt;
+          meteor.x += meteor.dx * meteor.spd * dt;
+          meteor.y += meteor.dy * meteor.spd * dt;
+          var mp = meteor.t / meteor.life;
+          if (mp >= 1 || meteor.x - meteor.len > W || meteor.y - meteor.len > H) {
+            meteor = null;
+            nextMeteorAt = t + 20 + Math.random() * 20;
+          } else if (dt > 0) {
+            // 首尾各 20% 寿命渐隐；宽淡尾 + 白亮芯 + 头部光点三层
+            var ma = Math.min(1, Math.min(mp, 1 - mp) / 0.2) * 0.85;
+            var tx = meteor.x - meteor.dx * meteor.len;
+            var ty = meteor.y - meteor.dy * meteor.len;
+            ctx.save();
+            ctx.lineCap = 'round';
+            var mg = ctx.createLinearGradient(meteor.x, meteor.y, tx, ty);
+            mg.addColorStop(0, 'rgba(216,228,248,' + ma.toFixed(3) + ')');
+            mg.addColorStop(1, 'rgba(216,228,248,0)');
+            ctx.strokeStyle = mg;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(meteor.x, meteor.y);
+            ctx.lineTo(tx, ty);
+            ctx.stroke();
+            ctx.globalAlpha = ma;
+            ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.moveTo(meteor.x, meteor.y);
+            ctx.lineTo(tx, ty);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(255,255,255,0.95)';
+            ctx.beginPath();
+            ctx.arc(meteor.x, meteor.y, 1.6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+      } else {
+        // 白天 / 昼夜过渡期：清掉残留并持续顺延计时（入夜稳定后 8~20s 出现第一颗）
+        meteor = null;
+        nextMeteorAt = t + 8 + Math.random() * 12;
+      }
+
       // ---- 漂流几何体 ----
       updateDrifters(dt, t);
       for (var di = 0; di < drifters.length; di++) {
@@ -2283,7 +2635,7 @@
     //   否则它们会把粒子重新推开；寿命只缩 10~15%（缩太狠淡入淡出会吃掉大半生命）。
     //   稳态存活 = rate 中值 × life 中值 ≈ 21~29 个，远低于 MAX_PARTICLES=60。
     var TRAIL_CONFIG = {
-      // 春 · 桃花瓣：粉色小菱形 + 旋转，斜上/斜下飘散后缓慢下落
+      // 春 · 桃花瓣：贝塞尔水滴形花瓣（顶部中央凹口、基部泛白渐变），1/8 概率生成五瓣小桃花
       spring: {
         rate: [20, 28], life: [45, 62], size: [2.4, 4.4],
         color: '#f8c8d8',
@@ -2291,31 +2643,35 @@
         rotSpeed: [-3.4, 3.4], sway: 6, swayFreq: [1.2, 2.2],
         brown: 0, trail: false, twinkle: 0
       },
-      // 夏 · 蒲公英种子：白色十字细丝 + 中心白点，四周絮状散开、布朗飘荡
+      // 夏 · 蒲公英种子：顶部放射冠毛 + 细梗 + 纺锤形种子，冠毛朝上随风微倾。
+      // 2026-09-12 行为重做：不再原地布朗晃动，改为「乘风飞远再消散」——
+      //   wind 是不衰减的持续风移（生成时随机方向/强度），life 加长让它飞得够远；
+      //   rate 相应下调，稳态存活数仍控制在 ~30 个（上限 60 的一半）。
       summer: {
-        rate: [18, 26], life: [62, 80], size: [2.6, 4.2],
+        rate: [12, 18], life: [100, 140], size: [2.6, 4.2],
         color: '#ffffff', color2: '#f0f4f8',
-        speed: [5, 13], gravity: 4, drag: 0.952,
+        speed: [5, 13], gravity: 3, drag: 0.985,
+        wind: [35, 85],
         rotSpeed: [-1.6, 1.6], sway: 0, swayFreq: [1, 1],
-        brown: 170, trail: false, twinkle: 0
+        brown: 60, trail: false, twinkle: 0
       },
-      // 秋 · 银杏叶：金黄扇形 + 叶柄，斜下飘落、左右摇摆 + 旋转
+      // 秋 · 银杏叶：金黄扇形叶面（放射脉络 + 顶部浅裂 + 细叶柄），下落时翻飞摇摆
       autumn: {
         rate: [20, 28], life: [54, 70], size: [3.0, 5.0],
-        color: '#d4a373',
+        color: '#e8b83a',
         vx: [-11, 11], vy: [5, 17], gravity: 21, drag: 0.960,
         rotSpeed: [-2.6, 2.6], sway: 40, swayFreq: [2.2, 3.6],
         brown: 0, trail: false, twinkle: 0
       },
-      // 冬 · 冰晶碎片：冰蓝白六边形，缓慢下落 + 微弱旋转
+      // 冬 · 雪花：六臂枝晶（每片的分叉位置/数量随机生成并缓存），缓慢下落 + 微弱旋转
       winter: {
         rate: [18, 26], life: [70, 88], size: [2.2, 4.0],
-        color: '#e8f0fe',
+        color: '#dbe8fa',
         vx: [-7, 7], vy: [3, 9], gravity: 8, drag: 0.968,
         rotSpeed: [-1.2, 1.2], sway: 5, swayFreq: [0.8, 1.6],
         brown: 0, trail: false, twinkle: 0
       },
-      // 夜 · 星尘：暖白光点 + 渐变拖尾，四周缓慢飘散、消散慢、带闪烁
+      // 夜 · 星尘：暖白~淡蓝光点 + 四芒星光针 + 渐变拖尾，四周缓慢飘散、消散慢、带闪烁
       // 2026-09-02 二次调整：夜不参与四季那套「行程减半 + 数量 2.5 倍」。
       //   理由：夜的诉求不是显眼而是宁静，密度增强后 27 个大光点挤在 3.5px 内糊成亮斑，
       //   把星尘感做没了。此处只回退「大小 + 数量」，运动参数取上一版与增强版的中值，
@@ -2411,6 +2767,41 @@
         p.vx = rand(cfg.vx[0], cfg.vx[1]);
         p.vy = rand(cfg.vy[0], cfg.vy[1]);
       }
+      // ---- 形态参数：按类型在生成时随机定死并缓存（绘制层用，不引入每帧随机）----
+      if (type === 'spring') {
+        p.floret = Math.random() < 0.125;          // 1/8 概率生成五瓣小桃花
+      } else if (type === 'summer') {
+        p.bristles = [];                            // 冠毛：8~12 条，角度在朝上扇面内、长短随机
+        var nB = 8 + (Math.random() * 5 | 0);
+        for (var ib = 0; ib < nB; ib++) {
+          p.bristles.push({
+            a: -Math.PI / 2 + (Math.random() - 0.5) * 2.4,
+            len: 0.75 + Math.random() * 0.5
+          });
+        }
+        // 乘风飞远：持续风移（左右随机方向、略带向上的升风），不参与阻尼衰减
+        p.windX = (Math.random() < 0.5 ? -1 : 1) * rand(cfg.wind[0], cfg.wind[1]);
+        p.windY = rand(-24, 6);
+      } else if (type === 'autumn') {
+        p.baseRot = p.rotation;                     // 翻飞的基准角
+        p.veins = [];                               // 叶脉：3~5 条，均布在扇面内、避开顶部裂口
+        var nV = 3 + (Math.random() * 3 | 0);
+        for (var iv = 0; iv < nV; iv++) {
+          p.veins.push(-Math.PI / 2 + (nV > 1 ? (iv / (nV - 1) - 0.5) * 2.2 : 0));
+        }
+      } else if (type === 'winter') {
+        p.arms = [];                                // 雪枝：每臂 2~3 对分叉，位置/长度随机
+        var nA = 2 + (Math.random() * 2 | 0);
+        for (var ia = 0; ia < nA; ia++) {
+          p.arms.push({
+            at: 0.38 + ia * 0.22 + Math.random() * 0.08,
+            len: 0.28 + Math.random() * 0.18
+          });
+        }
+      } else if (type === 'night') {
+        p.colorT = Math.random();                   // 色温：0 暖白 → 1 淡蓝
+        p.spike = 0.8 + Math.random() * 0.5;        // 四芒星长度系数（星等感）
+      }
       return p;
     }
 
@@ -2420,10 +2811,11 @@
         if (particles.length) { particles.length = 0; octx.clearRect(0, 0, OW, OH); wasEmpty = true; }
         return;
       }
-      // ---- 主题联动：夜间优先（夜间模式下季节按钮 disabled），切换立即清空粒子池 ----
+      // ---- 主题联动：夜间优先（夜间模式下季节按钮 disabled）。
+      // 软过渡（2026-09-12）：切主题不再清空粒子池——老粒子带着出生时的形态参数
+      // 自然飘完消散，新粒子直接用新主题形态，切换时不再"唰地全部消失"。
       var type = (themeMode === 'night') ? 'night' : themeSeason;
       if (type !== curType) {
-        particles.length = 0;
         curType = type;
         curRate = sampleRate(TRAIL_CONFIG[type]);
         emitAcc = 0;
@@ -2447,24 +2839,34 @@
         emitAcc = 0;
       }
 
-      var dragF = Math.pow(cfg.drag, dt * 60);   // 阻尼帧率无关化
       for (var i = particles.length - 1; i >= 0; i--) {
         var p = particles[i];
+        // 每个粒子用自己的形态参数（主题软过渡期新旧形态短暂共存）
+        var pc = TRAIL_CONFIG[p.type] || cfg;
+        var dragF = Math.pow(pc.drag, dt * 60);   // 阻尼帧率无关化
         p.life -= dt;
         if (p.life <= 0) { particles.splice(i, 1); continue; }
 
-        p.vy += cfg.gravity * dt;
-        if (cfg.brown) {   // 布朗运动：随机扰动，营造絮状飘荡
-          p.vx += (Math.random() * 2 - 1) * cfg.brown * dt;
-          p.vy += (Math.random() * 2 - 1) * cfg.brown * dt * 0.6;
+        p.vy += pc.gravity * dt;
+        if (pc.brown) {   // 布朗运动：随机扰动，营造絮状飘荡
+          p.vx += (Math.random() * 2 - 1) * pc.brown * dt;
+          p.vy += (Math.random() * 2 - 1) * pc.brown * dt * 0.6;
         }
         p.vx *= dragF;
         p.vy *= dragF;
+        // 蒲公英的持续风移：独立于速度/阻尼体系，保证种子一直飞而不衰减到原地晃
+        if (p.windX) { p.x += p.windX * dt; p.y += (p.windY || 0) * dt; }
 
         p.swayPhase += p.swayFreq * dt;
-        p.x += (p.vx + Math.sin(p.swayPhase) * cfg.sway) * dt;
+        p.x += (p.vx + Math.sin(p.swayPhase) * pc.sway) * dt;
         p.y += p.vy * dt;
-        p.rotation += p.rotSpeed * dt;
+        if (p.baseRot !== undefined) {
+          // 秋叶翻飞：旋转角随摇摆相位来回摆动（周期性换向），而不是匀速自转——
+          // 这是落叶区别于雪花的标志性动态
+          p.rotation = p.baseRot + Math.sin(p.swayPhase * 0.8) * 1.2;
+        } else {
+          p.rotation += p.rotSpeed * dt;
+        }
 
         if (p.trail) {
           p.trail.push({ x: p.x, y: p.y });
@@ -2474,88 +2876,160 @@
         // 透明度：出生淡入 + 消亡淡出
         var k = p.life / p.maxLife;
         p.alpha = Math.max(0, Math.min(1, (1 - k) / 0.2, k / 0.35));
-        if (cfg.twinkle) {   // 星尘闪烁
+        if (pc.twinkle) {   // 星尘闪烁
           var tw = 0.5 + 0.5 * Math.sin(p.twinklePhase + p.life * 9);
-          p.alpha *= (1 - cfg.twinkle * 0.5) + cfg.twinkle * 0.5 * tw;
+          p.alpha *= (1 - pc.twinkle * 0.5) + pc.twinkle * 0.5 * tw;
         }
       }
     }
 
     // ---- 各主题粒子绘制（均不调用 spawnSplash / spawnRipple 等现有特效） ----
 
-    function drawPetal(p, cfg) {          // 春：小菱形花瓣
+    // 单片桃花瓣路径：水滴形、尖端朝下，顶部中央一个小凹口（桃花瓣的标志特征）。
+    // 供单片花瓣与五瓣小桃花复用；坐标为局部空间，随 CTM 旋转/缩放。
+    function petalPath(s) {
+      octx.beginPath();
+      octx.moveTo(0, s * 1.3);
+      octx.bezierCurveTo(-s * 1.15, s * 0.85, -s * 1.2, -s * 0.55, -s * 0.3, -s * 1.35);
+      octx.lineTo(0, -s * 1.02);            // 顶端中央凹口底
+      octx.lineTo(s * 0.3, -s * 1.35);
+      octx.bezierCurveTo(s * 1.2, -s * 0.55, s * 1.15, s * 0.85, 0, s * 1.3);
+      octx.closePath();
+    }
+
+    function drawPetal(p, cfg) {          // 春：单片桃花瓣（基部泛白 → 边缘粉的渐变）
       var s = p.size;
       octx.translate(p.x, p.y);
       octx.rotate(p.rotation);
-      octx.scale(1, 0.68);
-      octx.beginPath();
-      octx.moveTo(0, -s * 1.25);
-      octx.lineTo(s * 0.85, 0);
-      octx.lineTo(0, s * 1.25);
-      octx.lineTo(-s * 0.85, 0);
-      octx.closePath();
-      octx.fillStyle = cfg.color;
+      var grad = octx.createLinearGradient(0, s * 1.3, 0, -s * 1.35);
+      grad.addColorStop(0, '#fdeef4');
+      grad.addColorStop(1, cfg.color);
+      octx.fillStyle = grad;
+      petalPath(s);
       octx.fill();
     }
 
-    function drawDandelion(p, cfg) {      // 夏：十字细丝 + 中心白点
-      var s = p.size;
+    function drawFloret(p, cfg) {         // 春：五瓣小桃花（1/8 概率点缀）
+      var s = p.size * 0.55;
       octx.translate(p.x, p.y);
       octx.rotate(p.rotation);
+      var grad = octx.createLinearGradient(0, s * 1.3, 0, -s * 1.35);
+      grad.addColorStop(0, '#fdeef4');
+      grad.addColorStop(1, cfg.color);
+      octx.fillStyle = grad;
+      for (var i = 0; i < 5; i++) {
+        octx.rotate(Math.PI * 2 / 5);
+        petalPath(s);
+        octx.fill();
+      }
+      // 花蕊：中心一撮黄色小点
+      octx.fillStyle = '#f5d76e';
+      for (var j = 0; j < 5; j++) {
+        var ang = j * Math.PI * 2 / 5 + 0.3;
+        octx.beginPath();
+        octx.arc(Math.cos(ang) * s * 0.5, Math.sin(ang) * s * 0.5, s * 0.18, 0, Math.PI * 2);
+        octx.fill();
+      }
+    }
+
+    function drawDandelion(p, cfg) {      // 夏：蒲公英种子（放射冠毛 + 细梗 + 纺锤种子）
+      var s = p.size;
+      octx.translate(p.x, p.y);
+      // 朝向：冠毛始终朝上，随风移方向整体倾斜（含持续风移，像被风推着走）
+      var tilt = Math.max(-0.45, Math.min(0.45, -((p.vx || 0) + (p.windX || 0) * 0.6) * 0.03));
+      octx.rotate(tilt);
+      // 顶部放射冠毛：细弧线向上扇形散开（角度/长短在生成时缓存）
+      var R = s * 2.3;
       octx.strokeStyle = cfg.color2;
-      octx.lineWidth = 1.1;   // 密度增强：0.9 → 1.1（白细丝在浅色夏季海面上不够立）
+      octx.lineWidth = 0.7;
       octx.beginPath();
-      for (var a = 0; a < 4; a++) {
-        var ang = a * Math.PI / 2 + 0.35;
+      for (var i = 0; i < p.bristles.length; i++) {
+        var b = p.bristles[i];
+        var len = R * b.len;
+        var ex = Math.cos(b.a) * len, ey = Math.sin(b.a) * len;
+        var cx = Math.cos(b.a) * len * 0.5, cy = Math.sin(b.a) * len * 0.5 - len * 0.12;
         octx.moveTo(0, 0);
-        octx.lineTo(Math.cos(ang) * s * 1.9, Math.sin(ang) * s * 1.9);
+        octx.quadraticCurveTo(cx, cy, ex, ey);
       }
       octx.stroke();
-      octx.beginPath();
-      octx.arc(0, 0, s * 0.55, 0, Math.PI * 2);   // 密度增强：0.32 → 0.55
-      octx.fillStyle = cfg.color;
-      octx.fill();
-    }
-
-    function drawGinkgo(p, cfg) {         // 秋：扇形叶面 + 叶柄
-      var s = p.size;
-      octx.translate(p.x, p.y);
-      octx.rotate(p.rotation);
-      octx.strokeStyle = cfg.color;
-      octx.lineWidth = 1;
+      // 细梗
+      octx.lineWidth = 0.8;
       octx.beginPath();
       octx.moveTo(0, 0);
       octx.lineTo(0, s * 1.5);
       octx.stroke();
-      octx.beginPath();
-      octx.moveTo(0, 0);
-      octx.arc(0, 0, s * 1.15, -Math.PI * 0.85, -Math.PI * 0.15);
-      octx.closePath();
+      // 种子：细长纺锤形挂在梗底
       octx.fillStyle = cfg.color;
+      octx.beginPath();
+      octx.ellipse(0, s * 1.5 + s * 0.55, s * 0.3, s * 0.65, 0, 0, Math.PI * 2);
       octx.fill();
     }
 
-    function drawIce(p, cfg) {            // 冬：六边形冰晶
+    function drawGinkgo(p, cfg) {         // 秋：银杏叶（扇形叶面 + 放射脉络 + 顶部浅裂）
       var s = p.size;
       octx.translate(p.x, p.y);
-      octx.rotate(p.rotation);
-      octx.beginPath();
-      for (var a = 0; a < 6; a++) {
-        var ang = a * Math.PI / 3;
-        var px = Math.cos(ang) * s, py = Math.sin(ang) * s;
-        if (a === 0) octx.moveTo(px, py); else octx.lineTo(px, py);
-      }
-      octx.closePath();
-      octx.fillStyle = cfg.color;
-      octx.globalAlpha = p.alpha * 0.85;   // 密度增强：0.55 → 0.85（冰晶不再半透）
-      octx.fill();
-      octx.globalAlpha = p.alpha;
-      octx.strokeStyle = cfg.color;
+      octx.rotate(p.rotation);   // 翻飞角由 updateParticles 驱动（随摇摆相位来回换向）
+      var r = s * 1.5;
+      var A0 = -Math.PI / 2 - 1.75, A1 = -Math.PI / 2 + 1.75;   // 约 200° 扇面
+      var NOTCH = 0.13;                                          // 顶部中央浅裂半宽
+      // 叶柄：自叶基向下微弯
+      octx.strokeStyle = '#c9962f';
       octx.lineWidth = 1;
+      octx.beginPath();
+      octx.moveTo(0, 0);
+      octx.quadraticCurveTo(s * 0.18, s * 0.9, s * 0.06, s * 1.8);
+      octx.stroke();
+      // 叶面：基部深金 → 边缘亮黄
+      var grad = octx.createLinearGradient(0, 0, 0, -r);
+      grad.addColorStop(0, '#d9a41e');
+      grad.addColorStop(1, '#f4c542');
+      octx.fillStyle = grad;
+      octx.beginPath();
+      octx.moveTo(0, 0);
+      octx.arc(0, 0, r, A0, -Math.PI / 2 - NOTCH);   // 左半外缘
+      octx.lineTo(0, -r * 0.72);                      // 裂口凹向叶基
+      octx.arc(0, 0, r, -Math.PI / 2 + NOTCH, A1);    // 右半外缘（自动连线成裂口右缘）
+      octx.closePath();
+      octx.fill();
+      // 放射脉络：从叶基伸向扇缘（角度在生成时缓存）
+      octx.strokeStyle = 'rgba(150,100,15,0.4)';
+      octx.lineWidth = 0.6;
+      octx.beginPath();
+      for (var i = 0; i < p.veins.length; i++) {
+        octx.moveTo(0, 0);
+        octx.lineTo(Math.cos(p.veins[i]) * r * 0.88, Math.sin(p.veins[i]) * r * 0.88);
+      }
       octx.stroke();
     }
 
-    function drawStardust(p, cfg) {       // 夜：渐变拖尾 + 光点
+    function drawIce(p, cfg) {            // 冬：六臂枝晶雪花（分叉形态每片随机）
+      var s = p.size * 2.0;   // 主臂长——雪花需要比原六边形更大的半径才看得清分叉
+      octx.translate(p.x, p.y);
+      octx.rotate(p.rotation);
+      octx.strokeStyle = cfg.color;
+      octx.lineWidth = 1.1;
+      octx.lineCap = 'round';
+      for (var i = 0; i < 6; i++) {
+        octx.rotate(Math.PI / 3);
+        // 主臂
+        octx.beginPath();
+        octx.moveTo(0, 0);
+        octx.lineTo(0, -s);
+        octx.stroke();
+        // 一对 60° 分叉（朝臂尖方向），位置/长度生成时缓存
+        for (var j = 0; j < p.arms.length; j++) {
+          var br = p.arms[j];
+          var by = -s * br.at;
+          var bl = s * br.len;
+          octx.beginPath();
+          octx.moveTo(0, by); octx.lineTo(bl * 0.5, by - bl * 0.866);
+          octx.moveTo(0, by); octx.lineTo(-bl * 0.5, by - bl * 0.866);
+          octx.stroke();
+        }
+      }
+    }
+
+    function drawStardust(p, cfg) {       // 夜：四芒星 + 渐变拖尾（色温随机、闪烁呼吸）
       var tr = p.trail;
       if (tr && tr.length > 1) {
         octx.lineCap = 'round';
@@ -2570,10 +3044,25 @@
           octx.stroke();
         }
       }
-      octx.globalAlpha = p.alpha;
-      octx.fillStyle = cfg.color;
+      var tw = 0.5 + 0.5 * Math.sin(p.twinklePhase + p.life * 9);
+      // 色温插值：0 暖白 → 1 淡蓝（每颗星生成时定死，形成"星等"差异）
+      var cr = Math.round(255 - p.colorT * 25);
+      var cg = Math.round(251 - p.colorT * 10);
+      var cb = Math.round(230 + p.colorT * 25);
+      // 四芒星光针：长度随闪烁相位呼吸
+      var spike = p.size * 2.6 * p.spike * (0.5 + 0.5 * tw);
+      octx.globalAlpha = p.alpha * 0.7;
+      octx.strokeStyle = 'rgba(' + cr + ',' + cg + ',' + cb + ',1)';
+      octx.lineWidth = 0.8;
       octx.beginPath();
-      octx.arc(p.x, p.y, p.size * 0.62, 0, Math.PI * 2);   // 夜不参与密度增强，保持 0.62
+      octx.moveTo(p.x - spike, p.y); octx.lineTo(p.x + spike, p.y);
+      octx.moveTo(p.x, p.y - spike); octx.lineTo(p.x, p.y + spike);
+      octx.stroke();
+      // 核心光点
+      octx.globalAlpha = p.alpha;
+      octx.fillStyle = 'rgba(' + cr + ',' + cg + ',' + cb + ',1)';
+      octx.beginPath();
+      octx.arc(p.x, p.y, p.size * 0.62, 0, Math.PI * 2);
       octx.fill();
     }
 
@@ -2588,7 +3077,7 @@
         var p = particles[i];
         octx.save();
         octx.globalAlpha = p.alpha;
-        if (p.type === 'spring') drawPetal(p, TRAIL_CONFIG.spring);
+        if (p.type === 'spring') { (p.floret ? drawFloret : drawPetal)(p, TRAIL_CONFIG.spring); }
         else if (p.type === 'summer') drawDandelion(p, TRAIL_CONFIG.summer);
         else if (p.type === 'autumn') drawGinkgo(p, TRAIL_CONFIG.autumn);
         else if (p.type === 'winter') drawIce(p, TRAIL_CONFIG.winter);
@@ -2801,6 +3290,8 @@
     // mousedown 触发点击效果（仅彩蛋模式启用）
     window.addEventListener('mousedown', function (e) {
       if (!enabled) return;
+      // 点在按钮/输入框/链接等交互元素上时不冒粒子，避免干扰正常操作
+      if (e.target && e.target.closest && e.target.closest('button, input, textarea, select, a, [contenteditable]')) return;
       createClick(e.clientX, e.clientY);
     });
 

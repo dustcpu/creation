@@ -6,9 +6,26 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
+
+<!-- 分享卡片：发给微信 / QQ / 微博 / Twitter 时显示标题与摘要，而不是一串裸链接 -->
+<meta name="description" content="纪念碑谷风格的单页个人博客。海洋与漂流几何体、可以捞起来的漂流瓶、想法流与相册。">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="几何岛屿">
+<meta property="og:title" content="几何岛屿 · 我的想法流">
+<meta property="og:description" content="纪念碑谷风格的单页个人博客。海洋与漂流几何体、可以捞起来的漂流瓶、想法流与相册。">
+<meta property="og:locale" content="zh_CN">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="几何岛屿 · 我的想法流">
+<meta name="twitter:description" content="纪念碑谷风格的单页个人博客。海洋与漂流几何体、可以捞起来的漂流瓶、想法流与相册。">
+<!-- og:image 必须是绝对 URL，且各平台均不支持 SVG / data URI。
+     如需分享缩略图：放一张 1200×630 的 PNG 到站点根目录，取消下面注释并把域名换成你的。
+<meta property="og:image" content="https://你的域名/og-image.png">
+<meta name="twitter:image" content="https://你的域名/og-image.png">
+-->
+
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 L30 10 L16 18 L2 10 Z' fill='%233d7fc4'/%3E%3Cpath d='M2 10 L16 18 L16 30 L2 22 Z' fill='%2324558c'/%3E%3Cpath d='M30 10 L16 18 L16 30 L30 22 Z' fill='%2316324f'/%3E%3C/svg%3E">
 <title>几何岛屿 · 我的想法流</title>
-<link rel="stylesheet" href="style.css?v=20260908-11">
+<link rel="stylesheet" href="style.css?v=20260912">
 <!-- Gitalk 评论样式 -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gitalk@1/dist/gitalk.css">
 </head>
@@ -40,7 +57,7 @@
   <div class="nav-actions">
     <button class="nav-btn nav-btn-primary" id="btnNewPost" hidden>＋ 新建帖子</button>
     <button class="nav-btn" id="btnUploadPhoto" hidden>⬆ 上传照片</button>
-    <button class="nav-btn login-btn" id="btnLogin">登录 GitHub</button>
+    <button class="nav-btn login-btn" id="btnLogin">使用 GitHub 登录</button>
     <span class="user-chip" id="userChip" hidden></span>
     <button class="nav-btn login-btn" id="btnLogout" hidden>登出</button>
   </div>
@@ -49,7 +66,7 @@
 <main>
 
   <!-- 登录入口提示（仅未登录时显示） -->
-  <div class="login-tip" id="loginTip">登录 GitHub 后即可评论、点赞互动</div>
+  <div class="login-tip" id="loginTip">使用 GitHub 登录后即可评论、点赞互动</div>
 
   <!-- ============ 首页 ============ -->
   <section id="home" class="page active">
@@ -192,9 +209,11 @@
 <!-- 回到顶部按钮 -->
 <button class="back-to-top" id="backToTop" aria-label="回到顶部" style="display:none">↑</button>
 
-<script src="https://cdn.jsdelivr.net/npm/gitalk@1/dist/gitalk.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gitalk@1/dist/gitalk.min.js" defer></script>
+<!-- DOMContentLoaded 晚于所有 defer 脚本执行，确保 Gitalk 构造器已就绪 -->
 <script>
-  const gitalk = new Gitalk({
+  window.addEventListener('DOMContentLoaded', function () {
+    const gitalk = new Gitalk({
     clientID: 'YOUR_GITHUB_CLIENT_ID',
     // clientSecret 已迁移到 Pages Function 代理端（functions/gitalk-proxy.js），前端不再明文暴露
     repo: 'YOUR_REPO_NAME',
@@ -204,9 +223,10 @@
     distractionFreeMode: false,
     // Pages Function 代理（与博客同域名，绕开 workers.dev 的 DNS 污染）
     proxy: 'https://YOUR_DOMAIN/gitalk-proxy'
+    });
+    gitalk.render('gitalk-container');
   });
-  gitalk.render('gitalk-container');
-</script>
+  </script>
 
 <!-- ============ 岛屿 SVG（body 直系、position:fixed、视口绝对锚点） ============
      独立挂 body 直系的目的：完全脱离 .hero-scene/.hero-inner/.hero 的 CSS 影响，
@@ -293,9 +313,12 @@
   </g>
 </svg>
 
-<!-- Markdown 渲染（想法流帖子 + 评论）：放 body 底部、app.js 之前，避免阻塞首屏渲染 -->
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script src="app.js?v=20260908-11"></script>
+<!-- Markdown 渲染（想法流帖子 + 评论）：defer 不阻塞解析；版本锁定 18.0.12，
+     避免 marked 上游发破坏性更新时渲染链静默失效（setOptions 的行为以该版本为准） -->
+<script src="https://cdn.jsdelivr.net/npm/marked@18.0.12/marked.min.js" defer></script>
+<!-- XSS 净化：marked 产出的 HTML 经 DOMPurify 过滤后再插入页面 -->
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js" defer></script>
+<script src="app.js?v=20260912" defer></script>
 
 </body>
 </html>

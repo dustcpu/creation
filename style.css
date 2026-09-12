@@ -456,7 +456,7 @@
     letter-spacing: 0.5px;
   }
 
-  .thought p { font-size: 0.98rem; color: var(--text); word-wrap: break-word; }
+  .thought .md { font-size: 0.98rem; color: var(--text); word-wrap: break-word; }
   /* ---------- 想法流搜索框 ---------- */
   .thoughts-search {
     width: 100%; max-width: 420px; margin: 0 0 18px;
@@ -846,63 +846,63 @@
   }
 
   /* ---------- Markdown 渲染样式（想法流帖子 + 评论） ---------- */
-  .thought p, .c-text { line-height: 1.75; }
-  .thought p p, .c-text p { margin: 0.5em 0; }
-  .thought p p:first-child, .c-text p:first-child { margin-top: 0; }
-  .thought p p:last-child, .c-text p:last-child { margin-bottom: 0; }
-  .thought p a, .c-text a { color: var(--blue-500); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--blue-500) 30%, transparent); }
-  .thought p a:hover, .c-text a:hover { color: var(--blue-700); border-bottom-color: var(--blue-500); }
-  .thought p strong, .c-text strong { font-weight: 700; color: var(--text); }
-  .thought p em, .c-text em { font-style: italic; }
-  .thought p del, .c-text del { color: var(--muted); }
-  .thought p code, .c-text code {
+  .thought .md, .c-text { line-height: 1.75; }
+  .thought .md p, .c-text p { margin: 0.5em 0; }
+  .thought .md p:first-child, .c-text p:first-child { margin-top: 0; }
+  .thought .md p:last-child, .c-text p:last-child { margin-bottom: 0; }
+  .thought .md a, .c-text a { color: var(--blue-500); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--blue-500) 30%, transparent); }
+  .thought .md a:hover, .c-text a:hover { color: var(--blue-700); border-bottom-color: var(--blue-500); }
+  .thought .md strong, .c-text strong { font-weight: 700; color: var(--text); }
+  .thought .md em, .c-text em { font-style: italic; }
+  .thought .md del, .c-text del { color: var(--muted); }
+  .thought .md code, .c-text code {
     background: color-mix(in srgb, var(--blue-100) 60%, transparent);
     color: var(--blue-700);
     padding: 2px 6px; border-radius: 5px;
     font-size: 0.88em; font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
   }
-  .thought p pre, .c-text pre {
+  .thought .md pre, .c-text pre {
     background: #0e1420; color: #c8d4e8;
     padding: 14px 16px; border-radius: 10px;
     overflow-x: auto; margin: 0.8em 0;
     font-size: 0.85rem; line-height: 1.6;
     font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
   }
-  .thought p pre code, .c-text pre code {
+  .thought .md pre code, .c-text pre code {
     background: none; color: inherit; padding: 0; font-size: inherit;
   }
-  .thought p blockquote, .c-text blockquote {
+  .thought .md blockquote, .c-text blockquote {
     border-left: 3px solid var(--blue-400);
     margin: 0.8em 0; padding: 4px 0 4px 14px;
     color: var(--muted); background: color-mix(in srgb, var(--blue-50) 50%, transparent);
     border-radius: 0 8px 8px 0;
   }
-  .thought p blockquote p, .c-text blockquote p { margin: 0.3em 0; }
-  .thought p ul, .c-text ul, .thought p ol, .c-text ol { margin: 0.5em 0; padding-left: 1.6em; }
-  .thought p li, .c-text li { margin: 0.25em 0; }
-  .thought p li input[type="checkbox"], .c-text li input[type="checkbox"] { margin-right: 6px; transform: translateY(1px); }
-  .thought p h1, .c-text h1, .thought p h2, .c-text h2, .thought p h3, .c-text h3,
-  .thought p h4, .c-text h4, .thought p h5, .c-text h5, .thought p h6, .c-text h6 {
+  .thought .md blockquote p, .c-text blockquote p { margin: 0.3em 0; }
+  .thought .md ul, .c-text ul, .thought .md ol, .c-text ol { margin: 0.5em 0; padding-left: 1.6em; }
+  .thought .md li, .c-text li { margin: 0.25em 0; }
+  .thought .md li input[type="checkbox"], .c-text li input[type="checkbox"] { margin-right: 6px; transform: translateY(1px); }
+  .thought .md h1, .c-text h1, .thought .md h2, .c-text h2, .thought .md h3, .c-text h3,
+  .thought .md h4, .c-text h4, .thought .md h5, .c-text h5, .thought .md h6, .c-text h6 {
     font-weight: 700; margin: 0.9em 0 0.4em; color: var(--text); line-height: 1.35;
   }
-  .thought p h1, .c-text h1 { font-size: 1.4rem; }
-  .thought p h2, .c-text h2 { font-size: 1.25rem; }
-  .thought p h3, .c-text h3 { font-size: 1.1rem; }
-  .thought p h4, .c-text h4 { font-size: 1rem; }
-  .thought p table, .c-text table {
+  .thought .md h1, .c-text h1 { font-size: 1.4rem; }
+  .thought .md h2, .c-text h2 { font-size: 1.25rem; }
+  .thought .md h3, .c-text h3 { font-size: 1.1rem; }
+  .thought .md h4, .c-text h4 { font-size: 1rem; }
+  .thought .md table, .c-text table {
     border-collapse: collapse; margin: 0.8em 0; width: 100%;
     font-size: 0.88rem;
   }
-  .thought p th, .c-text th, .thought p td, .c-text td {
+  .thought .md th, .c-text th, .thought .md td, .c-text td {
     border: 1px solid color-mix(in srgb, var(--blue-200) 60%, transparent);
     padding: 8px 12px; text-align: left;
   }
-  .thought p th, .c-text th { background: color-mix(in srgb, var(--blue-50) 70%, transparent); font-weight: 700; }
-  .thought p tr:nth-child(even) td, .c-text tr:nth-child(even) td {
+  .thought .md th, .c-text th { background: color-mix(in srgb, var(--blue-50) 70%, transparent); font-weight: 700; }
+  .thought .md tr:nth-child(even) td, .c-text tr:nth-child(even) td {
     background: color-mix(in srgb, var(--blue-50) 30%, transparent);
   }
-  .thought p img, .c-text img { max-width: 100%; border-radius: 8px; margin: 0.5em 0; }
-  .thought p hr, .c-text hr {
+  .thought .md img, .c-text img { max-width: 100%; border-radius: 8px; margin: 0.5em 0; }
+  .thought .md hr, .c-text hr {
     border: none; border-top: 1px solid color-mix(in srgb, var(--blue-200) 50%, transparent);
     margin: 1em 0;
   }
@@ -1376,3 +1376,72 @@
       transition-duration: 0.01ms !important;
     }
   }
+
+  /* ==========================================================
+     移动端适配（2026-09-11）
+     ========================================================== */
+
+  /* 全局防溢出：长 URL / 长英文单词 / 超宽图片不再把布局撑破 */
+  body { overflow-wrap: break-word; }
+  .thought .md img, .c-text img, .photo img { max-width: 100%; height: auto; }
+
+  @media (max-width: 600px) {
+    .container { padding: 0 16px; }
+    .hero { padding: 48px 0 28px; }
+    /* 时间线留白与卡片内边距同步收紧；小圆点 left 需跟着 gutter 一起改，
+       否则会与竖线错位（gutter - 31 = 圆点左偏移，保持 3px 不变） */
+    .thoughts { padding-left: 26px; }
+    .thought::before { left: -23px; }
+    .thought { padding: 16px 18px; margin-bottom: 18px; border-radius: 12px; }
+    .album-grid { gap: 12px; }
+  }
+
+  @media (max-width: 480px) {
+    .container { padding: 0 14px; }
+    .thoughts { padding-left: 22px; }
+    .thought::before { left: -19px; }
+    .thought { padding: 14px 15px; }
+
+    /* 触摸目标放大到 36px 以上，避免手指点不中 */
+    .nav-links a { padding: 9px 12px; }
+    .nav-btn { padding: 8px 11px; }
+    .post-action-btn { padding: 6px 10px; }
+
+    /* iOS Safari：字号小于 16px 的输入框会在聚焦时自动放大整页 */
+    input, textarea, select { font-size: 16px; }
+
+    /* 评论区：Gitalk 默认内边距在窄屏偏大，且排序/翻页可能挤成一行溢出 */
+    .gt-container .gt-comment-body { font-size: 0.94rem; }
+    .comment-sort-bar, .comment-pagination { flex-wrap: wrap; gap: 8px; }
+
+    .back-to-top { right: 14px; bottom: 16px; width: 40px; height: 40px; }
+    .toast { min-width: 0; max-width: calc(100vw - 32px); }
+  }
+
+  /* ==========================================================
+     2026-09-12 优化批次新增
+     ========================================================== */
+
+  /* ---------- 键盘可达性 ----------
+     仅键盘聚焦时显示焦点框（:focus-visible，鼠标点击不触发），
+     作为搜索框 / 弹窗输入 / 评论输入 / 排序下拉 / 主题按钮等 outline:none 的替代方案。 */
+  :focus-visible {
+    outline: 2px solid var(--blue-500);
+    outline-offset: 2px;
+  }
+
+  /* ---------- 主题面板移动端展开态 ----------
+     触摸设备没有 hover，平时面板只露出 14px 边条；app.js 在点边条时切换 .open。 */
+  .theme-panel.open {
+    transform: translateY(-50%) translateX(0);
+  }
+
+  /* ---------- 想法流「显示更多」按钮 ---------- */
+  .thoughts-more-btn {
+    display: block;
+    margin: 0 auto 22px;
+  }
+
+  /* ---------- 加载失败时的「重试」按钮（在空状态容器内） ---------- */
+  .empty-retry-btn { margin-top: 12px; }
+  .empty-retry-btn:disabled { opacity: 0.5; cursor: wait; }
