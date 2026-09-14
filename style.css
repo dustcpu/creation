@@ -1506,13 +1506,127 @@
 .avatar-penrose svg { width: 62px; height: 62px; }
 /* 旋转加在内部 g 上，transform-box:view-box 让 transform-origin 按 SVG 用户坐标解析；
    彭罗斯三角是等边三角形，视觉重心在 viewBox 的 (44,48)（非画布中心），绕它自转才不画圈 */
-.avatar-penrose svg g {
+.avatar-penrose svg g.penrose-spin {
   transform-box: view-box;
   transform-origin: 44px 48px;
   animation: penrose-spin 22s linear infinite;
 }
 @keyframes penrose-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .avatar-penrose svg g { animation: none; }
+  .avatar-penrose svg g.penrose-spin { animation: none; }
   .avatar-penrose { transition: opacity .3s ease; }
+}
+
+/* 彭罗斯受光：直接动画每个臂的 fill 颜色（不用调明暗、不用变量插值）。
+   固定光源在左上：臂转到左上方位染白(hi)、左下方位染该主题中间色(mid)、右下方位染深色(lo)，
+   三色沿圆周线性平滑渐变。三臂共用同一「方位→颜色」映射，只按真实初始方位(225.9/110.9/350.3)错相，
+   故「任意臂转到同一方位=同一色」。每个主题写死三色 hex，避免运行中切主题时 CSS 变量不重算。 */
+.avatar-penrose .hl { display: none; }
+body .avatar-penrose .pf1 { animation: lit1-summer 22s linear infinite; }
+body .avatar-penrose .pf2 { animation: lit2-summer 22s linear infinite; }
+body .avatar-penrose .pf3 { animation: lit3-summer 22s linear infinite; }
+body.season-spring .avatar-penrose .pf1 { animation: lit1-spring 22s linear infinite; }
+body.season-spring .avatar-penrose .pf2 { animation: lit2-spring 22s linear infinite; }
+body.season-spring .avatar-penrose .pf3 { animation: lit3-spring 22s linear infinite; }
+body.season-autumn .avatar-penrose .pf1 { animation: lit1-autumn 22s linear infinite; }
+body.season-autumn .avatar-penrose .pf2 { animation: lit2-autumn 22s linear infinite; }
+body.season-autumn .avatar-penrose .pf3 { animation: lit3-autumn 22s linear infinite; }
+body.season-winter .avatar-penrose .pf1 { animation: lit1-winter 22s linear infinite; }
+body.season-winter .avatar-penrose .pf2 { animation: lit2-winter 22s linear infinite; }
+body.season-winter .avatar-penrose .pf3 { animation: lit3-winter 22s linear infinite; }
+body.night .avatar-penrose .pf1 { animation: lit1-night 22s linear infinite; }
+body.night .avatar-penrose .pf2 { animation: lit2-night 22s linear infinite; }
+body.night .avatar-penrose .pf3 { animation: lit3-night 22s linear infinite; }
+@keyframes lit1-summer {
+  0% { fill: #ffffff; }
+  50.14% { fill: #16324f; }
+  66.89% { fill: #7fb2e0; }
+  100% { fill: #ffffff; }
+}
+@keyframes lit2-summer {
+  0% { fill: #7fb2e0; }
+  33.11% { fill: #ffffff; }
+  83.25% { fill: #16324f; }
+  100% { fill: #7fb2e0; }
+}
+@keyframes lit3-summer {
+  0% { fill: #16324f; }
+  16.75% { fill: #7fb2e0; }
+  49.86% { fill: #ffffff; }
+  100% { fill: #16324f; }
+}
+@keyframes lit1-spring {
+  0% { fill: #ffffff; }
+  50.14% { fill: #1a3d1a; }
+  66.89% { fill: #8bc88b; }
+  100% { fill: #ffffff; }
+}
+@keyframes lit2-spring {
+  0% { fill: #8bc88b; }
+  33.11% { fill: #ffffff; }
+  83.25% { fill: #1a3d1a; }
+  100% { fill: #8bc88b; }
+}
+@keyframes lit3-spring {
+  0% { fill: #1a3d1a; }
+  16.75% { fill: #8bc88b; }
+  49.86% { fill: #ffffff; }
+  100% { fill: #1a3d1a; }
+}
+@keyframes lit1-autumn {
+  0% { fill: #ffffff; }
+  50.14% { fill: #5c3310; }
+  66.89% { fill: #e8b87a; }
+  100% { fill: #ffffff; }
+}
+@keyframes lit2-autumn {
+  0% { fill: #e8b87a; }
+  33.11% { fill: #ffffff; }
+  83.25% { fill: #5c3310; }
+  100% { fill: #e8b87a; }
+}
+@keyframes lit3-autumn {
+  0% { fill: #5c3310; }
+  16.75% { fill: #e8b87a; }
+  49.86% { fill: #ffffff; }
+  100% { fill: #5c3310; }
+}
+@keyframes lit1-winter {
+  0% { fill: #ffffff; }
+  50.14% { fill: #3a2560; }
+  66.89% { fill: #b8a0d8; }
+  100% { fill: #ffffff; }
+}
+@keyframes lit2-winter {
+  0% { fill: #b8a0d8; }
+  33.11% { fill: #ffffff; }
+  83.25% { fill: #3a2560; }
+  100% { fill: #b8a0d8; }
+}
+@keyframes lit3-winter {
+  0% { fill: #3a2560; }
+  16.75% { fill: #b8a0d8; }
+  49.86% { fill: #ffffff; }
+  100% { fill: #3a2560; }
+}
+@keyframes lit1-night {
+  0% { fill: #ffffff; }
+  50.14% { fill: #3a5a82; }
+  66.89% { fill: #6b95c8; }
+  100% { fill: #ffffff; }
+}
+@keyframes lit2-night {
+  0% { fill: #6b95c8; }
+  33.11% { fill: #ffffff; }
+  83.25% { fill: #3a5a82; }
+  100% { fill: #6b95c8; }
+}
+@keyframes lit3-night {
+  0% { fill: #3a5a82; }
+  16.75% { fill: #6b95c8; }
+  49.86% { fill: #ffffff; }
+  100% { fill: #3a5a82; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .avatar-penrose .pf { animation: none; }
 }

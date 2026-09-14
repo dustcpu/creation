@@ -28,7 +28,7 @@
 <link rel="preconnect" href="https://api.github.com" crossorigin>
 <link rel="preconnect" href="https://cdn.jsdelivr.net">
 <title>几何岛屿 · 我的想法流</title>
-<link rel="stylesheet" href="style.css?v=20260914-3">
+<link rel="stylesheet" href="style.css?v=20260914-13">
 <!-- Gitalk 评论样式 -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gitalk@1/dist/gitalk.css">
 </head>
@@ -116,10 +116,13 @@
                 <!-- 彭罗斯三角（不可能三角）：仅在鼠标光圈内揭示，缓慢自转；三面明度贴合等距风格 -->
                 <!-- viewBox 以三角形重心(44,48)为中心、半边长 50≥外接半径48.4，保证任意旋转角度角尖都不被裁切 -->
                 <svg viewBox="-6 -2 100 100" fill="none">
-                  <g stroke="var(--blue-700)" stroke-width="1.6" stroke-linejoin="round">
-                    <polygon points="0,68 69,68 64,60 14,60 48,0 38,0" fill="#ffffff"/>
-                    <polygon points="0,68 4,76 84,76 48,17 43.5,23.5 69,68" fill="var(--blue-200)"/>
-                    <polygon points="84,76 88,68 48,0 14,60 23,60 48,17" fill="var(--blue-500)"/>
+                  <g class="penrose-spin" stroke="var(--blue-700)" stroke-width="1.6" stroke-linejoin="round">
+                    <polygon class="pf pf1" points="0,68 69,68 64,60 14,60 48,0 38,0" fill="#ffffff"/>
+                    <polygon class="pf pf2" points="0,68 4,76 84,76 48,17 43.5,23.5 69,68" fill="var(--blue-200)"/>
+                    <polygon class="pf pf3" points="84,76 88,68 48,0 14,60 23,60 48,17" fill="var(--blue-500)"/>
+                    <polygon class="hl hl1" stroke="none" points="0,68 69,68 64,60 14,60 48,0 38,0" fill="#ffffff"/>
+                    <polygon class="hl hl2" stroke="none" points="0,68 4,76 84,76 48,17 43.5,23.5 69,68" fill="#ffffff"/>
+                    <polygon class="hl hl3" stroke="none" points="84,76 88,68 48,0 14,60 23,60 48,17" fill="#ffffff"/>
                   </g>
                 </svg>
               </div>
