@@ -1445,3 +1445,74 @@
   /* ---------- 加载失败时的「重试」按钮（在空状态容器内） ---------- */
   .empty-retry-btn { margin-top: 12px; }
   .empty-retry-btn:disabled { opacity: 0.5; cursor: wait; }
+
+/* ==========================================================
+   2026-09-14 交互批次：内容入场淡入 / 你的名字花体签名 / 彭罗斯三角揭示
+   ========================================================== */
+
+/* ---------- ① 内容入场淡入（IntersectionObserver 进入视口加 .in） ---------- */
+.reveal {
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity .5s ease, transform .5s ease;
+  will-change: opacity, transform;
+}
+.reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+}
+
+/* ---------- ② 你的名字 花体手写签名（SVG 描边动画，颜色跟随 currentColor） ---------- */
+.hero-name { line-height: 1.1; }
+.hero-name .sig { display: block; height: 1.5em; width: auto; overflow: visible; }
+.hero-name .sig-path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: sig-draw 1.6s cubic-bezier(.45,.05,.3,1) .15s forwards;
+}
+.hero-name .sig-dot {
+  fill: currentColor;
+  opacity: 0;
+  animation: sig-dot .35s ease 1.55s forwards;
+}
+@keyframes sig-draw { to { stroke-dashoffset: 0; } }
+@keyframes sig-dot  { to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .hero-name .sig-path { stroke-dashoffset: 0; animation: none; }
+  .hero-name .sig-dot { opacity: 1; animation: none; }
+}
+
+/* ---------- ③ 头像双层：常态立方体，悬停完整切换为旋转的彭罗斯三角（不裁切、棱角完整） ---------- */
+.avatar { touch-action: none; }
+.avatar-base, .avatar-penrose {
+  grid-row: 1; grid-column: 1;
+  display: grid; place-items: center;
+  transition: opacity .3s ease;
+}
+.avatar-penrose {
+  --tx: 0px; --ty: 0px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(var(--tx), var(--ty));
+  transition: opacity .3s ease, transform .18s ease-out;
+}
+.avatar.is-revealing .avatar-base { opacity: 0; }
+.avatar.is-revealing .avatar-penrose { opacity: 1; }
+.avatar-penrose svg { width: 62px; height: 62px; }
+/* 旋转加在内部 g 上，transform-box:view-box 让 transform-origin 按 SVG 用户坐标解析；
+   彭罗斯三角是等边三角形，视觉重心在 viewBox 的 (44,48)（非画布中心），绕它自转才不画圈 */
+.avatar-penrose svg g {
+  transform-box: view-box;
+  transform-origin: 44px 48px;
+  animation: penrose-spin 22s linear infinite;
+}
+@keyframes penrose-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .avatar-penrose svg g { animation: none; }
+  .avatar-penrose { transition: opacity .3s ease; }
+}

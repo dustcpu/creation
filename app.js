@@ -346,9 +346,10 @@
     }
 
     var visible = kw ? filtered : filtered.slice(0, thoughtsShown);
-    visible.forEach(function (t) {
+    visible.forEach(function (t, ti) {
       const art = document.createElement('article');
-      art.className = 'thought';
+      art.className = 'thought reveal';
+      art.style.transitionDelay = (ti % 8) * 55 + 'ms';
       const liked = likedIssues.has(t.number);
       art.innerHTML =
         '<span class="thought-date">' + escapeHtml(t.date) + '</span>' +
@@ -388,6 +389,8 @@
       });
       thoughtsList.insertBefore(more, thoughtsEmpty);
     }
+
+    armReveals(thoughtsList);
   }
 
   // 搜索框实时过滤（带简单防抖）
@@ -406,7 +409,8 @@
 
     photos.forEach(function (p, idx) {
       const div = document.createElement('div');
-      div.className = 'photo';
+      div.className = 'photo reveal';
+      div.style.transitionDelay = (idx % 9) * 50 + 'ms';
       // 网格用 ~400px 缩略图，灯箱才加载原图（省流量、加快首屏）。
       // 缩略图路径与原图同名加 thumb_ 前缀；旧照片没有缩略图，onerror 回退原图。
       var thumbSrc = p.path
@@ -425,6 +429,8 @@
       const delPhotoBtn = div.querySelector('.photo-delete-btn');
       if (delPhotoBtn) delPhotoBtn.addEventListener('click', function (e) { e.stopPropagation(); deletePhoto(p.number, p.path, div); });
     });
+
+    armReveals(albumGrid);
   }
 
   // ==================== 内容缓存（TTL 10 分钟） ====================
@@ -1074,6 +1080,53 @@
   });
 
   // ==================== 初始化 ====================
+  // ==================== 内容入场淡入 + 头像彭罗斯揭示（2026-09-14） ====================
+  // ① 进入视口淡入上移：元素带 .reveal，IO 进入视口加 .in（只触发一次）
+  var revealObserver = ('IntersectionObserver' in window)
+    ? new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (en.isIntersecting) {
+            en.target.classList.add('in');
+            revealObserver.unobserve(en.target);
+          }
+        });
+      }, { threshold: 0.06, rootMargin: '0px 0px -6% 0px' })
+    : null;
+  function armReveals(root) {
+    if (!revealObserver) return;
+    (root || document).querySelectorAll('.reveal:not(.in)').forEach(function (el) {
+      revealObserver.observe(el);
+    });
+  }
+  if (!revealObserver) {
+    // 不支持 IntersectionObserver 的老浏览器：兜底直接显示
+    var fallbackStyle = document.createElement('style');
+    fallbackStyle.textContent = '.reveal{opacity:1!important;transform:none!important}';
+    document.head.appendChild(fallbackStyle);
+  }
+
+  // ③ 头像双层：鼠标进入圆内 → 立方体淡出、完整彭罗斯三角淡入（带轻微跟随位移，不裁切）
+  (function initAvatarReveal() {
+    var av = document.getElementById('avatarReveal');
+    if (!av) return;
+    var PARALLAX = 4;   // 彭罗斯跟随鼠标的位移上限(px)
+    function move(e) {
+      var r = av.getBoundingClientRect();
+      var nx = ((e.clientX - r.left) / r.width - 0.5) * 2;    // -1..1
+      var ny = ((e.clientY - r.top) / r.height - 0.5) * 2;
+      av.style.setProperty('--tx', (nx * PARALLAX).toFixed(2) + 'px');
+      av.style.setProperty('--ty', (ny * PARALLAX).toFixed(2) + 'px');
+      av.classList.add('is-revealing');
+    }
+    av.addEventListener('mousemove', move);
+    av.addEventListener('mouseenter', move);
+    av.addEventListener('mouseleave', function () {
+      av.classList.remove('is-revealing');
+      av.style.setProperty('--tx', '0px');
+      av.style.setProperty('--ty', '0px');
+    });
+  })();
+
   async function init() {
     try {
       const repo = await ghRequest('/repos/' + CONFIG.owner + '/' + CONFIG.repo);
@@ -1447,7 +1500,8 @@
     }
 
     // ---- 鼠标悬停几何体 ----
-    var TYPES = ['cube', 'pyramid', 'cylinder'];
+    // 六种等距线框几何体等概率随机：立方体 / 四棱锥 / 圆柱 / 圆锥 / 正八面体 / 六棱柱
+    var TYPES = ['cube', 'pyramid', 'cylinder', 'cone', 'octahedron', 'hexPrism'];
     var shape = null;
     var hoverTimer = null;
     var mouse = { x: 0, y: 0 };
@@ -1467,9 +1521,27 @@
     // 被 body 内容与导航栏覆盖，永远收不到 mousemove/mouseleave 事件，导致几何体无法浮出。
     var entered = false;
     var lastTouchEnd = 0;   // 触摸结束后短暂屏蔽浏览器合成的事件，避免松手后误浮出瓶子
+    // 头像圆形区域：在其内部不触发海洋悬停提起几何体（避免与头像彭罗斯交互打架）
+    function inAvatarCircle(px, py) {
+      var av = document.getElementById('avatarReveal');
+      if (!av) return false;
+      var r = av.getBoundingClientRect();
+      if (r.width === 0) return false;
+      var cx = r.left + r.width / 2, cy = r.top + r.height / 2, rad = r.width / 2;
+      var dx = px - cx, dy = py - cy;
+      return dx * dx + dy * dy <= rad * rad;
+    }
+
     // 鼠标与触摸共用：px / py 为视口坐标（函数体内统一用 mouse.x / mouse.y）
     function handlePointer(px, py) {
       if (!home.classList.contains('active')) return;   // 仅首页
+      // 在头像圆内：收起已浮出的几何体，且不启动新的海洋悬停计时
+      if (inAvatarCircle(px, py)) {
+        clearTimeout(hoverTimer);
+        if (shape && shape.phase !== 'sinking') sink();
+        for (var avI = 0; avI < drifters.length; avI++) drifters[avI].hovered = false;
+        return;
+      }
       if (!entered) {
         entered = true;
       }
@@ -1677,7 +1749,7 @@
         // 修正：画 bb→bc 和 bc→bd 两条实线；ba→bb 和 bd→ba 保持虚线
         // （上面已经画了虚线整圈，所以只需覆盖可见的）
 
-      } else {
+      } else if (s.type === 'cylinder') {
         // 圆柱体：等距投影下顶/底为水平椭圆（X:Y = 2:1）
         var rx = A;
         var ry = A * 0.5;
@@ -1714,6 +1786,81 @@
         // 两条可见的左/右母线（连接顶椭圆左右端点到底椭圆左右端点）
         line({ x: px - rx, y: topY }, { x: px - rx, y: botY }, SOLID, false);
         line({ x: px + rx, y: topY }, { x: px + rx, y: botY }, SOLID, false);
+
+      } else if (s.type === 'cone') {
+        // 圆锥：底椭圆（同圆柱 X:Y=2:1）+ 正上方顶点；py 为底椭圆中心
+        var cRx = A, cRy = A * 0.5, cH = side;
+        var cApex = { x: px, y: py - cH };
+        // 底椭圆后半弧（背向观察者）虚线
+        ctx.strokeStyle = DASH;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.ellipse(px, py, cRx, cRy, 0, Math.PI, 2 * Math.PI, false);
+        ctx.stroke();
+        // 背面母线（顶点 → 底椭圆最后端）被正面遮挡，虚线
+        line(cApex, { x: px, y: py - cRy }, DASH, true);
+        // 底椭圆前半弧（面向观察者）实线
+        ctx.strokeStyle = SOLID;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.ellipse(px, py, cRx, cRy, 0, 0, Math.PI, false);
+        ctx.stroke();
+        // 两条轮廓母线（顶点 → 底椭圆左右最宽点）
+        line(cApex, { x: px - cRx, y: py }, SOLID, false);
+        line(cApex, { x: px + cRx, y: py }, SOLID, false);
+
+      } else if (s.type === 'octahedron') {
+        // 正八面体：上下两个四棱锥底对底，赤道为菱形；py 为赤道（几何）中心
+        // 与 cube 同一 cabinet 投影：赤道半高 0.5A，上下顶点在 ±A（数学正八面体）
+        var oHh = A * 0.5, oHalf = A;
+        var oU = { x: px, y: py - oHalf };
+        var oD = { x: px, y: py + oHalf };
+        var oL = { x: px - A, y: py };
+        var oT = { x: px, y: py - oHh };
+        var oR = { x: px + A, y: py };
+        var oB = { x: px, y: py + oHh };
+        // ---- 不可见（虚线先画）：上/下顶点到赤道最后点 oT 的后棱，赤道后半两条 ----
+        line(oU, oT, DASH, true);
+        line(oD, oT, DASH, true);
+        line(oL, oT, DASH, true);
+        line(oT, oR, DASH, true);
+        // ---- 可见（实线）----
+        // 上锥三条可见侧棱
+        line(oU, oL, SOLID, false);
+        line(oU, oR, SOLID, false);
+        line(oU, oB, SOLID, false);
+        // 下锥三条可见侧棱
+        line(oD, oL, SOLID, false);
+        line(oD, oR, SOLID, false);
+        line(oD, oB, SOLID, false);
+        // 赤道前半两条
+        line(oR, oB, SOLID, false);
+        line(oB, oL, SOLID, false);
+
+      } else {
+        // 六棱柱：顶面为 cabinet 投影正六边形（sx=x, sy=z*0.5），py 为顶面中心，底面 y+side
+        var hR = A;                          // 六边形外接半径（=顶面半宽）
+        var hQ = A * Math.sqrt(3) / 4;       // 六边形前后顶点的竖直偏移（sin60 * 0.5）
+        function hexRing(yc) {
+          return [
+            { x: px + hR,       y: yc },        // 0 右
+            { x: px + hR / 2,   y: yc + hQ },   // 1 前右
+            { x: px - hR / 2,   y: yc + hQ },   // 2 前左
+            { x: px - hR,       y: yc },        // 3 左
+            { x: px - hR / 2,   y: yc - hQ },   // 4 后左
+            { x: px + hR / 2,   y: yc - hQ }    // 5 后右
+          ];
+        }
+        var hTop = hexRing(py);
+        var hBot = hexRing(py + side);
+        // ---- 不可见（虚线先画）：底面后半路径 0→5→4→3，背面母线 4/5 ----
+        poly([hBot[0], hBot[5], hBot[4], hBot[3]], DASH, true, false);
+        line(hTop[4], hBot[4], DASH, true);
+        line(hTop[5], hBot[5], DASH, true);
+        // ---- 可见（实线）----
+        poly(hTop, SOLID, false, true);                       // 顶面整圈
+        poly([hBot[3], hBot[2], hBot[1], hBot[0]], SOLID, false, false); // 底面前半
+        for (var hi = 0; hi < 4; hi++) line(hTop[hi], hBot[hi], SOLID, false); // 可见母线 0~3
       }
 
 
@@ -2216,6 +2363,23 @@
       [0,1],[1,2],[2,3],[3,0],
       [4,0],[4,1],[4,2],[4,3]
     ];
+    // 圆锥：顶点 0 + 底椭圆四点（左/前/右/后）1~4
+    var CONE_EDGES = [
+      [0,1],[0,3],[0,4],
+      [1,2],[2,3],[3,4],[4,1]
+    ];
+    // 正八面体：上顶点 0、赤道菱形 1~4（左/后/右/前）、下顶点 5
+    var OCTA_EDGES = [
+      [0,1],[0,2],[0,3],[0,4],
+      [5,1],[5,2],[5,3],[5,4],
+      [1,2],[2,3],[3,4],[4,1]
+    ];
+    // 六棱柱：顶面 0~5、底面 6~11（顶点顺序与 drawShape 的 hexRing 一致）
+    var HEX_EDGES = [
+      [0,1],[1,2],[2,3],[3,4],[4,5],[5,0],
+      [6,7],[7,8],[8,9],[9,10],[10,11],[11,6],
+      [0,6],[1,7],[2,8],[3,9],[4,10],[5,11]
+    ];
     // 边与 y + x*tanT=0 平面求交，返回 [hx, hy] 或 null
     function edgeHitRaw(x1, y1, x2, y2, tanT) {
       var f1 = y1 + x1 * tanT;
@@ -2255,17 +2419,22 @@
       var side = A * 1.118;
       var rx = d.x;
 
-      // 立方体倾斜后顶面一侧会进水，需上移几何体让顶面完整露出
+      // 立方体 / 六棱柱倾斜后平顶一侧会进水，需上移几何体让顶面完整露出
       var floatOffset = 0;
-      if (d.type === 'cube') {
+      if (d.type === 'cube' || d.type === 'hexPrism') {
         floatOffset = Math.max(0, A * Math.tan(effectiveTilt) - side / 2 + 0.06 * A);
       }
 
       // drawShape 的 py（顶面/底面基准点）
       var topPy;
-      if (d.type === 'pyramid') {
+      if (d.type === 'pyramid' || d.type === 'cone') {
+        // 顶点朝上、底面在下方：py 为底面中心，落在水面下半高
         topPy = centerY + side / 2;
+      } else if (d.type === 'octahedron') {
+        // py 为赤道（几何）中心，正好落在水面
+        topPy = centerY;
       } else {
+        // cube / cylinder / hexPrism：几何中心对齐水面
         topPy = centerY - side / 2 - floatOffset;
       }
 
@@ -2314,7 +2483,7 @@
           // 底椭圆前半弧与水面交点
           waterXs.push(rx - A / Math.sqrt(1 + 3 * sinT * sinT));
         } else {
-          // 立方体 / 四棱锥：枚举边与水面的交点（顶点直接数值计算，不创建对象数组）
+          // 其余五种：枚举边与水面的交点（顶点直接数值计算，不创建对象数组）
           var Hh = A * 0.5;
           var fo = floatOffset;
           var topY = -side / 2 - fo;
@@ -2330,7 +2499,7 @@
               [0, botY + Hh], [-A, botY]
             ];
             edges = CUBE_EDGES;
-          } else {
+          } else if (d.type === 'pyramid') {
             var bHW = A * 0.5, bHH = A * 0.25;
             verts = [
               [0, side/2 - bHH], [bHW, side/2],
@@ -2338,6 +2507,30 @@
               [0, -side/2]
             ];
             edges = PYRAMID_EDGES;
+          } else if (d.type === 'cone') {
+            // 顶点在水面上半高，底椭圆中心在水面下半高（四点近似椭圆）
+            var cRy = A * 0.5;
+            verts = [
+              [0, -side/2],
+              [-A, side/2], [0, side/2 + cRy], [A, side/2], [0, side/2 - cRy]
+            ];
+            edges = CONE_EDGES;
+          } else if (d.type === 'octahedron') {
+            // 上顶点 0、赤道菱形 1~4（左/后/右/前）、下顶点 5（上下顶点 ±A）
+            verts = [
+              [0, -A],
+              [-A, 0], [0, -Hh], [A, 0], [0, Hh],
+              [0, A]
+            ];
+            edges = OCTA_EDGES;
+          } else {
+            // 六棱柱：顶面 0~5、底面 6~11（顺序同 drawShape 的 hexRing）
+            var hQ = A * Math.sqrt(3) / 4;
+            verts = [
+              [A, topY], [A/2, topY + hQ], [-A/2, topY + hQ], [-A, topY], [-A/2, topY - hQ], [A/2, topY - hQ],
+              [A, botY], [A/2, botY + hQ], [-A/2, botY + hQ], [-A, botY], [-A/2, botY - hQ], [A/2, botY - hQ]
+            ];
+            edges = HEX_EDGES;
           }
           for (var ei = 0; ei < edges.length; ei++) {
             var e0 = edges[ei][0], e1 = edges[ei][1];

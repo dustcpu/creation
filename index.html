@@ -28,7 +28,7 @@
 <link rel="preconnect" href="https://api.github.com" crossorigin>
 <link rel="preconnect" href="https://cdn.jsdelivr.net">
 <title>几何岛屿 · 我的想法流</title>
-<link rel="stylesheet" href="style.css?v=20260912">
+<link rel="stylesheet" href="style.css?v=20260914-3">
 <!-- Gitalk 评论样式 -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gitalk@1/dist/gitalk.css">
 </head>
@@ -103,15 +103,38 @@
       <div class="hero">
         <div class="hero-inner">
           <div class="hero-text">
-            <div class="avatar">
-              <svg width="52" height="52" viewBox="0 0 52 52" fill="none">
-                <!-- 头像内的等距小立方体 -->
-                <path d="M26 8 L42 17 V35 L26 44 L10 35 V17 Z" fill="#ffffff" opacity="0.95"/>
-                <path d="M26 8 L42 17 L26 26 L10 17 Z" fill="var(--blue-50)"/>
-                <path d="M10 17 L26 26 V44 L10 35 Z" fill="var(--blue-100)"/>
+            <div class="avatar" id="avatarReveal">
+              <div class="avatar-base">
+                <svg width="52" height="52" viewBox="0 0 52 52" fill="none">
+                  <!-- 头像内的等距小立方体（常态层） -->
+                  <path d="M26 8 L42 17 V35 L26 44 L10 35 V17 Z" fill="#ffffff" opacity="0.95"/>
+                  <path d="M26 8 L42 17 L26 26 L10 17 Z" fill="var(--blue-50)"/>
+                  <path d="M10 17 L26 26 V44 L10 35 Z" fill="var(--blue-100)"/>
+                </svg>
+              </div>
+              <div class="avatar-penrose" aria-hidden="true">
+                <!-- 彭罗斯三角（不可能三角）：仅在鼠标光圈内揭示，缓慢自转；三面明度贴合等距风格 -->
+                <!-- viewBox 以三角形重心(44,48)为中心、半边长 50≥外接半径48.4，保证任意旋转角度角尖都不被裁切 -->
+                <svg viewBox="-6 -2 100 100" fill="none">
+                  <g stroke="var(--blue-700)" stroke-width="1.6" stroke-linejoin="round">
+                    <polygon points="0,68 69,68 64,60 14,60 48,0 38,0" fill="#ffffff"/>
+                    <polygon points="0,68 4,76 84,76 48,17 43.5,23.5 69,68" fill="var(--blue-200)"/>
+                    <polygon points="84,76 88,68 48,0 14,60 23,60 48,17" fill="var(--blue-500)"/>
+                  </g>
+                </svg>
+              </div>
+            </div>
+            <div class="hero-name">
+              <svg class="sig" viewBox="0 0 130 70" fill="none" role="img" aria-label="你的名字">
+                <path class="sig-path" pathLength="1"
+                  d="M18 16 C12 28 12 44 17 52 C30 56 43 49 43 35 C43 23 33 15 18 16
+                     M40 50 Q48 45 50 40
+                     M50 40 L50 50 C50 56 62 56 62 50 L62 36 Q66 30 70 34
+                     M70 34 C68 28 80 27 82 33 C84 39 70 40 72 47 C74 53 85 51 83 45
+                     M97 22 L92 54 M84 32 Q96 28 105 32"/>
+                <circle class="sig-dot" cx="113" cy="52" r="3.4"/>
               </svg>
             </div>
-            <div class="hero-name">你的名字</div>
             <p class="hero-tagline">「世界是破碎的几何，而我在缝隙里收集光。」</p>
           </div>
 
@@ -321,7 +344,7 @@
 <script src="https://cdn.jsdelivr.net/npm/marked@18.0.12/marked.min.js" defer></script>
 <!-- XSS 净化：marked 产出的 HTML 经 DOMPurify 过滤后再插入页面 -->
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js" defer></script>
-<script src="app.js?v=20260912-2" defer></script>
+<script src="app.js?v=20260914-2" defer></script>
 
 </body>
 </html>
